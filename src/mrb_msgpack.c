@@ -24,56 +24,91 @@ mrb_msgpack_buffer_write(void *data, const char *buf, size_t len)
 static inline void
 mrb_msgpack_pack_value(mrb_state *mrb, mrb_value self, msgpack_packer *pk)
 {
-  switch (mrb_type(self)) {
-    case MRB_TT_TRUE:
-      msgpack_pack_true(pk);
-    break;
-    case MRB_TT_FIXNUM:
+  if (mrb_fixnum_p(self)) {
 #if defined(MRB_INT16)
-      msgpack_pack_int16(pk, mrb_int(mrb, self));
+    msgpack_pack_int16(pk, mrb_int(mrb, self));
 #elif defined(MRB_INT64)
-      msgpack_pack_int64(pk, mrb_int(mrb, self));
+    msgpack_pack_int64(pk, mrb_int(mrb, self));
 #else
-      msgpack_pack_int32(pk, mrb_int(mrb, self));
+    msgpack_pack_int32(pk, mrb_int(mrb, self));
 #endif
-    break;
-    case MRB_TT_FLOAT:
+  }
+  else
+  if (mrb_nil_p(self))
+    msgpack_pack_nil(pk);
+  else
+  if (mrb_float_p(self)) {
 #if defined(MRB_USE_FLOAT)
-      msgpack_pack_float(pk, mrb_float(self));
+    msgpack_pack_float(pk, mrb_float(self));
 #else
-      msgpack_pack_double(pk, mrb_float(self));
+    msgpack_pack_double(pk, mrb_float(self));
 #endif
-    break;
-    case MRB_TT_ARRAY: {
-      msgpack_pack_array(pk, RARRAY_LEN(self));
-      for (mrb_int i = 0; i < RARRAY_LEN(self); ++i)
-        mrb_msgpack_pack_value(mrb, mrb_ary_ref(mrb, self, i), pk);
+  }
+  else
+  if (mrb_symbol_p(self)) {
+    mrb_int len;
+    const char *name = mrb_sym2name_len(mrb, mrb_symbol(self), &len);
+    if (is_utf8((unsigned char *) name, (size_t) len) == 0) {
+      msgpack_pack_str(pk, (size_t) len);
+      msgpack_pack_str_body(pk, name, (size_t) len);
+    } else {
+      msgpack_pack_bin(pk, (size_t) len);
+      msgpack_pack_bin_body(pk, name, (size_t) len);
     }
-    break;
-    case MRB_TT_HASH: {
-      mrb_value keys = mrb_hash_keys(mrb, self);
-      msgpack_pack_map(pk, RARRAY_LEN(keys));
-      for (mrb_int i = 0; i < RARRAY_LEN(keys); ++i) {
-        mrb_value key = mrb_ary_ref(mrb, keys, i);
-        mrb_msgpack_pack_value(mrb, key, pk);
-        mrb_msgpack_pack_value(mrb, mrb_hash_get(mrb, self, key), pk);
-      }
+  }
+  else
+  if (mrb_array_p(self)) {
+    msgpack_pack_array(pk, (size_t) RARRAY_LEN(self));
+    for (mrb_int i = 0; i < RARRAY_LEN(self); i++)
+      mrb_msgpack_pack_value(mrb, mrb_ary_ref(mrb, self, i), pk);
+  }
+  else
+  if (mrb_string_p(self)) {
+    if (is_utf8((unsigned char *) RSTRING_PTR(self), (size_t) RSTRING_LEN(self)) == 0) {
+      msgpack_pack_str(pk, (size_t) RSTRING_LEN(self));
+      msgpack_pack_str_body(pk, RSTRING_PTR(self), (size_t) RSTRING_LEN(self));
+    } else {
+      msgpack_pack_bin(pk, (size_t) RSTRING_LEN(self));
+      msgpack_pack_bin_body(pk, RSTRING_PTR(self), (size_t) RSTRING_LEN(self));
     }
-    break;
-    default: {
-      if (mrb_nil_p(self))
-        msgpack_pack_nil(pk);
-      else
-      if (mrb_type(self) == MRB_TT_FALSE)
-        msgpack_pack_false(pk);
+  }
+  else
+  if (mrb_hash_p(self)) {
+    mrb_value keys = mrb_hash_keys(mrb, self);
+    msgpack_pack_map(pk, (size_t) RARRAY_LEN(keys));
+    for (mrb_int i = 0; i < RARRAY_LEN(keys); i++) {
+      mrb_value key = mrb_ary_ref(mrb, keys, i);
+      mrb_msgpack_pack_value(mrb, key, pk);
+      mrb_msgpack_pack_value(mrb, mrb_hash_get(mrb, self, key), pk);
+    }
+  }
+  else
+  if (mrb_type(self) == MRB_TT_TRUE)
+    msgpack_pack_true(pk);
+  else
+  if (mrb_type(self) == MRB_TT_FALSE)
+    msgpack_pack_false(pk);
+  else {
+    mrb_value s;
+    s = mrb_check_convert_type(mrb, self, MRB_TT_ARRAY, "Array", "to_ary");
+    if (mrb_array_p(s))
+      mrb_msgpack_pack_value(mrb, s, pk);
+    else {
+      s = mrb_check_convert_type(mrb, self, MRB_TT_HASH, "Hash", "to_hash");
+      if (mrb_hash_p(s))
+        mrb_msgpack_pack_value(mrb, s, pk);
       else {
-        self = mrb_str_to_str(mrb, self);
-        if (is_utf8((unsigned char *) RSTRING_PTR(self), RSTRING_LEN(self)) == 0) {
-          msgpack_pack_str(pk, RSTRING_LEN(self));
-          msgpack_pack_str_body(pk, RSTRING_PTR(self), RSTRING_LEN(self));
-        } else {
-          msgpack_pack_bin(pk, RSTRING_LEN(self));
-          msgpack_pack_bin_body(pk, RSTRING_PTR(self), RSTRING_LEN(self));
+        s = mrb_check_convert_type(mrb, self, MRB_TT_FIXNUM, "Fixnum", "to_int");
+        if (mrb_fixnum_p(s))
+          mrb_msgpack_pack_value(mrb, s, pk);
+        else {
+          s = mrb_check_convert_type(mrb, self, MRB_TT_STRING, "String", "to_str");
+          if (mrb_string_p(s))
+            mrb_msgpack_pack_value(mrb, s, pk);
+          else {
+            s = mrb_convert_type(mrb, self, MRB_TT_STRING, "String", "to_s");
+            mrb_msgpack_pack_value(mrb, s, pk);
+          }
         }
       }
     }
@@ -130,7 +165,7 @@ mrb_unpack_msgpack_obj(mrb_state *mrb, msgpack_object obj)
     break;
     case MSGPACK_OBJECT_ARRAY: {
       if (obj.via.array.size != 0) {
-        mrb_value unpacked_array = mrb_ary_new_capa(mrb, obj.via.array.size);
+        mrb_value unpacked_array = mrb_ary_new_capa(mrb, (mrb_int) obj.via.array.size);
         msgpack_object* p = obj.via.array.ptr;
         msgpack_object* const pend = obj.via.array.ptr + obj.via.array.size;
         for(; p < pend; p++)
@@ -143,7 +178,7 @@ mrb_unpack_msgpack_obj(mrb_state *mrb, msgpack_object obj)
     break;
     case MSGPACK_OBJECT_MAP: {
       if (obj.via.map.size != 0) {
-        mrb_value unpacked_hash = mrb_hash_new_capa(mrb, obj.via.map.size);
+        mrb_value unpacked_hash = mrb_hash_new_capa(mrb, (mrb_int) obj.via.map.size);
         msgpack_object_kv* p = obj.via.map.ptr;
         msgpack_object_kv* const pend = obj.via.map.ptr + obj.via.map.size;
         for(; p < pend; p++)
