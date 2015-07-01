@@ -5,6 +5,7 @@
 #include <mruby/data.h>
 #include <mruby/hash.h>
 #include <mruby/string.h>
+#include <mruby/throw.h>
 #include <mruby/variable.h>
 #include "mruby/msgpack.h"
 #include "is_utf8.h"
@@ -201,9 +202,6 @@ static mrb_value
 mrb_msgpack_unpack(mrb_state *mrb, mrb_value self)
 {
   mrb_value data, block;
-  msgpack_unpacked *result;
-  size_t off = 0;
-  msgpack_unpack_return ret;
 
   mrb_get_args(mrb, "o&", &data, &block);
 
@@ -211,15 +209,31 @@ mrb_msgpack_unpack(mrb_state *mrb, mrb_value self)
     mrb_raise(mrb, E_ARGUMENT_ERROR, "no block given");
 
   data = mrb_str_to_str(mrb, data);
-  result = (msgpack_unpacked *) mrb_cptr(mrb_gv_get(mrb, mrb_intern_lit(mrb, "msgpack_unpacked")));
-  ret = msgpack_unpack_next(result, RSTRING_PTR(data), RSTRING_LEN(data), &off);
 
-  while (ret == MSGPACK_UNPACK_SUCCESS) {
-    mrb_yield(mrb, block, mrb_unpack_msgpack_obj(mrb, result->data));
-    ret = msgpack_unpack_next(result, RSTRING_PTR(data), RSTRING_LEN(data), &off);
-  }
+  msgpack_unpacked result;
+  size_t off = 0;
+  msgpack_unpack_return ret;
 
-  msgpack_unpacked_destroy(result);
+  msgpack_unpacked_init(&result);
+  ret = msgpack_unpack_next(&result, RSTRING_PTR(data), RSTRING_LEN(data), &off);
+
+  struct mrb_jmpbuf *prev_jmp = mrb->jmp;
+  struct mrb_jmpbuf c_jmp;
+
+  MRB_TRY(&c_jmp) {
+    mrb->jmp = &c_jmp;
+    while (ret == MSGPACK_UNPACK_SUCCESS) {
+      mrb_yield(mrb, block, mrb_unpack_msgpack_obj(mrb, result.data));
+      ret = msgpack_unpack_next(&result, RSTRING_PTR(data), RSTRING_LEN(data), &off);
+    }
+    mrb->jmp = prev_jmp;
+  } MRB_CATCH(&c_jmp) {
+    mrb->jmp = prev_jmp;
+    msgpack_unpacked_destroy(&result);
+    MRB_THROW(mrb->jmp);
+  } MRB_END_EXC(&c_jmp);
+
+  msgpack_unpacked_destroy(&result);
 
   if (ret == MSGPACK_UNPACK_NOMEM_ERROR) {
     mrb->out_of_memory = TRUE;
@@ -239,14 +253,9 @@ mrb_mruby_msgpack_gem_init(mrb_state* mrb) {
 
   msgpack_mod = mrb_define_module(mrb, "MessagePack");
   mrb_define_class_under(mrb, msgpack_mod, "Error", E_RUNTIME_ERROR);
-  msgpack_unpacked *p = (msgpack_unpacked *) mrb_calloc(mrb, 1, sizeof(msgpack_unpacked));
-  mrb_gv_set(mrb, mrb_intern_lit(mrb, "msgpack_unpacked"), mrb_cptr_value(mrb, p));
   mrb_define_module_function(mrb, msgpack_mod, "unpack", mrb_msgpack_unpack, (MRB_ARGS_REQ(1)|MRB_ARGS_BLOCK()));
 }
 
 void
 mrb_mruby_msgpack_gem_final(mrb_state* mrb) {
-  msgpack_unpacked *p = (msgpack_unpacked *) mrb_cptr(mrb_gv_get(mrb, mrb_intern_lit(mrb, "msgpack_unpacked")));
-  msgpack_unpacked_destroy(p);
-  mrb_free(mrb, p);
 }

@@ -1,7 +1,7 @@
 ﻿#ifndef MRUBY_MSGPACK_H
 #define MRUBY_MSGPACK_H
 
-#include "mruby.h"
+#include <mruby.h>
 
 #ifdef __cplusplus
 extern "C" {
