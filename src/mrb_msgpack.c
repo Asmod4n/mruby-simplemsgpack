@@ -27,11 +27,11 @@ mrb_msgpack_pack_value(mrb_state *mrb, mrb_value self, msgpack_packer *pk)
 {
   if (mrb_fixnum_p(self)) {
 #if defined(MRB_INT16)
-    msgpack_pack_int16(pk, mrb_int(mrb, self));
+    msgpack_pack_int16(pk, mrb_fixnum(self));
 #elif defined(MRB_INT64)
-    msgpack_pack_int64(pk, mrb_int(mrb, self));
+    msgpack_pack_int64(pk, mrb_fixnum(self));
 #else
-    msgpack_pack_int32(pk, mrb_int(mrb, self));
+    msgpack_pack_int32(pk, mrb_fixnum(self));
 #endif
   }
   else
@@ -166,11 +166,14 @@ mrb_unpack_msgpack_obj(mrb_state *mrb, msgpack_object obj)
     break;
     case MSGPACK_OBJECT_ARRAY: {
       if (obj.via.array.size != 0) {
+        int ai = mrb_gc_arena_save(mrb);
         mrb_value unpacked_array = mrb_ary_new_capa(mrb, (mrb_int) obj.via.array.size);
         msgpack_object* p = obj.via.array.ptr;
         msgpack_object* const pend = obj.via.array.ptr + obj.via.array.size;
-        for(; p < pend; p++)
+        for(; p < pend; p++) {
           mrb_ary_push(mrb, unpacked_array, mrb_unpack_msgpack_obj(mrb, *p));
+          mrb_gc_arena_restore(mrb, ai);
+        }
 
         return unpacked_array;
       }
@@ -179,11 +182,14 @@ mrb_unpack_msgpack_obj(mrb_state *mrb, msgpack_object obj)
     break;
     case MSGPACK_OBJECT_MAP: {
       if (obj.via.map.size != 0) {
+        int ai = mrb_gc_arena_save(mrb);
         mrb_value unpacked_hash = mrb_hash_new_capa(mrb, (mrb_int) obj.via.map.size);
         msgpack_object_kv* p = obj.via.map.ptr;
         msgpack_object_kv* const pend = obj.via.map.ptr + obj.via.map.size;
-        for(; p < pend; p++)
+        for(; p < pend; p++) {
           mrb_hash_set(mrb, unpacked_hash, mrb_unpack_msgpack_obj(mrb, p->key), mrb_unpack_msgpack_obj(mrb, p->val));
+          mrb_gc_arena_restore(mrb, ai);
+        }
 
         return unpacked_hash;
       }
@@ -222,8 +228,10 @@ mrb_msgpack_unpack(mrb_state *mrb, mrb_value self)
 
   MRB_TRY(&c_jmp) {
     mrb->jmp = &c_jmp;
+    int ai = mrb_gc_arena_save(mrb);
     while (ret == MSGPACK_UNPACK_SUCCESS) {
       mrb_yield(mrb, block, mrb_unpack_msgpack_obj(mrb, result.data));
+      mrb_gc_arena_restore(mrb, ai);
       ret = msgpack_unpack_next(&result, RSTRING_PTR(data), RSTRING_LEN(data), &off);
     }
     mrb->jmp = prev_jmp;
