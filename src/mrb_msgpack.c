@@ -15,12 +15,26 @@ typedef struct {
   mrb_value buffer;
 } mrb_msgpack_buffer;
 
+#if (__GNUC__ >= 3) || (__INTEL_COMPILER >= 800) || defined(__clang__)
+# define likely(x) __builtin_expect(!!(x), 1)
+# define unlikely(x) __builtin_expect(!!(x), 0)
+#else
+# define likely(x) (x)
+# define unlikely(x) (x)
+#endif
+
 static inline int
 mrb_msgpack_buffer_write(void *data, const char *buf, size_t len)
 {
   mrb_str_cat(((mrb_msgpack_buffer *) data)->mrb, ((mrb_msgpack_buffer *) data)->buffer, buf, len);
   return 0;
 }
+
+static inline void
+mrb_msgpack_pack_array(mrb_state *mrb, mrb_value self, msgpack_packer *pk);
+
+static inline void
+mrb_msgpack_pack_hash(mrb_state *mrb, mrb_value self, msgpack_packer *pk);
 
 static inline void
 mrb_msgpack_pack_value(mrb_state *mrb, mrb_value self, msgpack_packer *pk)
@@ -58,11 +72,8 @@ mrb_msgpack_pack_value(mrb_state *mrb, mrb_value self, msgpack_packer *pk)
     }
   }
   else
-  if (mrb_array_p(self)) {
-    msgpack_pack_array(pk, (size_t) RARRAY_LEN(self));
-    for (mrb_int i = 0; i < RARRAY_LEN(self); i++)
-      mrb_msgpack_pack_value(mrb, mrb_ary_ref(mrb, self, i), pk);
-  }
+  if (mrb_array_p(self))
+    mrb_msgpack_pack_array(mrb, self, pk);
   else
   if (mrb_string_p(self)) {
     if (is_utf8((unsigned char *) RSTRING_PTR(self), (size_t) RSTRING_LEN(self)) == 0) {
@@ -74,15 +85,8 @@ mrb_msgpack_pack_value(mrb_state *mrb, mrb_value self, msgpack_packer *pk)
     }
   }
   else
-  if (mrb_hash_p(self)) {
-    mrb_value keys = mrb_hash_keys(mrb, self);
-    msgpack_pack_map(pk, (size_t) RARRAY_LEN(keys));
-    for (mrb_int i = 0; i < RARRAY_LEN(keys); i++) {
-      mrb_value key = mrb_ary_ref(mrb, keys, i);
-      mrb_msgpack_pack_value(mrb, key, pk);
-      mrb_msgpack_pack_value(mrb, mrb_hash_get(mrb, self, key), pk);
-    }
-  }
+  if (mrb_hash_p(self))
+    mrb_msgpack_pack_hash(mrb, self, pk);
   else
   if (mrb_type(self) == MRB_TT_TRUE)
     msgpack_pack_true(pk);
@@ -116,6 +120,26 @@ mrb_msgpack_pack_value(mrb_state *mrb, mrb_value self, msgpack_packer *pk)
   }
 }
 
+static inline void
+mrb_msgpack_pack_array(mrb_state *mrb, mrb_value self, msgpack_packer *pk)
+{
+  msgpack_pack_array(pk, (size_t) RARRAY_LEN(self));
+  for (mrb_int i = 0; i != RARRAY_LEN(self); i++)
+    mrb_msgpack_pack_value(mrb, mrb_ary_ref(mrb, self, i), pk);
+}
+
+static inline void
+mrb_msgpack_pack_hash(mrb_state *mrb, mrb_value self, msgpack_packer *pk)
+{
+  mrb_value keys = mrb_hash_keys(mrb, self);
+  msgpack_pack_map(pk, (size_t) RARRAY_LEN(keys));
+  for (mrb_int i = 0; i != RARRAY_LEN(keys); i++) {
+    mrb_value key = mrb_ary_ref(mrb, keys, i);
+    mrb_msgpack_pack_value(mrb, key, pk);
+    mrb_msgpack_pack_value(mrb, mrb_hash_get(mrb, self, key), pk);
+  }
+}
+
 static mrb_value
 mrb_msgpack_pack(mrb_state *mrb, mrb_value self)
 {
@@ -129,6 +153,12 @@ mrb_msgpack_pack(mrb_state *mrb, mrb_value self)
 
   return sbuf.buffer;
 }
+
+static inline mrb_value
+mrb_unpack_msgpack_obj_array(mrb_state *mrb, msgpack_object obj);
+
+static inline mrb_value
+mrb_unpack_msgpack_obj_map(mrb_state *mrb, msgpack_object obj);
 
 static inline mrb_value
 mrb_unpack_msgpack_obj(mrb_state *mrb, msgpack_object obj)
@@ -164,37 +194,11 @@ mrb_unpack_msgpack_obj(mrb_state *mrb, msgpack_object obj)
     case MSGPACK_OBJECT_STR:
       return mrb_str_new(mrb, obj.via.str.ptr, obj.via.str.size);
     break;
-    case MSGPACK_OBJECT_ARRAY: {
-      if (obj.via.array.size != 0) {
-        int ai = mrb_gc_arena_save(mrb);
-        mrb_value unpacked_array = mrb_ary_new_capa(mrb, (mrb_int) obj.via.array.size);
-        msgpack_object* p = obj.via.array.ptr;
-        msgpack_object* const pend = obj.via.array.ptr + obj.via.array.size;
-        for(; p < pend; p++) {
-          mrb_ary_push(mrb, unpacked_array, mrb_unpack_msgpack_obj(mrb, *p));
-          mrb_gc_arena_restore(mrb, ai);
-        }
-
-        return unpacked_array;
-      }
-      return mrb_ary_new(mrb);
-    }
+    case MSGPACK_OBJECT_ARRAY:
+      return mrb_unpack_msgpack_obj_array(mrb, obj);
     break;
-    case MSGPACK_OBJECT_MAP: {
-      if (obj.via.map.size != 0) {
-        int ai = mrb_gc_arena_save(mrb);
-        mrb_value unpacked_hash = mrb_hash_new_capa(mrb, (mrb_int) obj.via.map.size);
-        msgpack_object_kv* p = obj.via.map.ptr;
-        msgpack_object_kv* const pend = obj.via.map.ptr + obj.via.map.size;
-        for(; p < pend; p++) {
-          mrb_hash_set(mrb, unpacked_hash, mrb_unpack_msgpack_obj(mrb, p->key), mrb_unpack_msgpack_obj(mrb, p->val));
-          mrb_gc_arena_restore(mrb, ai);
-        }
-
-        return unpacked_hash;
-      }
-      return mrb_hash_new(mrb);
-    }
+    case MSGPACK_OBJECT_MAP:
+      return mrb_unpack_msgpack_obj_map(mrb, obj);
     break;
     case MSGPACK_OBJECT_BIN:
       return mrb_str_new(mrb, obj.via.bin.ptr, obj.via.bin.size);
@@ -204,6 +208,44 @@ mrb_unpack_msgpack_obj(mrb_state *mrb, msgpack_object obj)
   }
 }
 
+static inline mrb_value
+mrb_unpack_msgpack_obj_array(mrb_state *mrb, msgpack_object obj)
+{
+  if (likely(obj.via.array.size != 0)) {
+    int ai = mrb_gc_arena_save(mrb);
+    mrb_value unpacked_array = mrb_ary_new_capa(mrb, (mrb_int) obj.via.array.size);
+    msgpack_object* p = obj.via.array.ptr;
+    msgpack_object* const pend = obj.via.array.ptr + obj.via.array.size;
+    for(; p != pend; p++) {
+      mrb_ary_push(mrb, unpacked_array, mrb_unpack_msgpack_obj(mrb, *p));
+      mrb_gc_arena_restore(mrb, ai);
+    }
+
+    return unpacked_array;
+  }
+  else
+    return mrb_ary_new(mrb);
+}
+
+static inline mrb_value
+mrb_unpack_msgpack_obj_map(mrb_state *mrb, msgpack_object obj)
+{
+  if (likely(obj.via.map.size != 0)) {
+    int ai = mrb_gc_arena_save(mrb);
+    mrb_value unpacked_hash = mrb_hash_new_capa(mrb, (mrb_int) obj.via.map.size);
+    msgpack_object_kv* p = obj.via.map.ptr;
+    msgpack_object_kv* const pend = obj.via.map.ptr + obj.via.map.size;
+    for(; p != pend; p++) {
+      mrb_hash_set(mrb, unpacked_hash, mrb_unpack_msgpack_obj(mrb, p->key), mrb_unpack_msgpack_obj(mrb, p->val));
+      mrb_gc_arena_restore(mrb, ai);
+    }
+
+    return unpacked_hash;
+  }
+  else
+    return mrb_hash_new(mrb);
+}
+
 static mrb_value
 mrb_msgpack_unpack(mrb_state *mrb, mrb_value self)
 {
@@ -211,7 +253,7 @@ mrb_msgpack_unpack(mrb_state *mrb, mrb_value self)
 
   mrb_get_args(mrb, "o&", &data, &block);
 
-  if (mrb_nil_p(block))
+  if (unlikely(mrb_nil_p(block)))
     mrb_raise(mrb, E_ARGUMENT_ERROR, "no block given");
 
   data = mrb_str_to_str(mrb, data);
@@ -243,7 +285,7 @@ mrb_msgpack_unpack(mrb_state *mrb, mrb_value self)
 
   msgpack_unpacked_destroy(&result);
 
-  if (ret == MSGPACK_UNPACK_NOMEM_ERROR) {
+  if (unlikely(ret == MSGPACK_UNPACK_NOMEM_ERROR)) {
     mrb->out_of_memory = TRUE;
     mrb_exc_raise(mrb, mrb_obj_value(mrb->nomem_err));
   }
