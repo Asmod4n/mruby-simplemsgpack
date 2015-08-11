@@ -253,9 +253,6 @@ mrb_msgpack_unpack(mrb_state *mrb, mrb_value self)
 
   mrb_get_args(mrb, "o&", &data, &block);
 
-  if (unlikely(mrb_nil_p(block)))
-    mrb_raise(mrb, E_ARGUMENT_ERROR, "no block given");
-
   data = mrb_str_to_str(mrb, data);
 
   msgpack_unpacked result;
@@ -267,14 +264,21 @@ mrb_msgpack_unpack(mrb_state *mrb, mrb_value self)
 
   struct mrb_jmpbuf *prev_jmp = mrb->jmp;
   struct mrb_jmpbuf c_jmp;
+  mrb_value unpack_return = self;
 
   MRB_TRY(&c_jmp) {
     mrb->jmp = &c_jmp;
-    int ai = mrb_gc_arena_save(mrb);
-    while (ret == MSGPACK_UNPACK_SUCCESS) {
-      mrb_yield(mrb, block, mrb_unpack_msgpack_obj(mrb, result.data));
-      mrb_gc_arena_restore(mrb, ai);
-      ret = msgpack_unpack_next(&result, RSTRING_PTR(data), RSTRING_LEN(data), &off);
+    if (mrb_nil_p(block)) {
+      if (ret == MSGPACK_UNPACK_SUCCESS) {
+        unpack_return = mrb_unpack_msgpack_obj(mrb, result.data)
+      }
+    } else {
+      int ai = mrb_gc_arena_save(mrb);
+      while (ret == MSGPACK_UNPACK_SUCCESS) {
+        mrb_yield(mrb, block, mrb_unpack_msgpack_obj(mrb, result.data));
+        mrb_gc_arena_restore(mrb, ai);
+        ret = msgpack_unpack_next(&result, RSTRING_PTR(data), RSTRING_LEN(data), &off);
+      }
     }
     mrb->jmp = prev_jmp;
   } MRB_CATCH(&c_jmp) {
@@ -292,7 +296,7 @@ mrb_msgpack_unpack(mrb_state *mrb, mrb_value self)
   if (ret == MSGPACK_UNPACK_PARSE_ERROR)
     mrb_raise(mrb, E_MSGPACK_ERROR, "Invalid data recieved");
 
-  return self;
+  return unpack_return;
 }
 
 void
