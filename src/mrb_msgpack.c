@@ -270,7 +270,7 @@ mrb_msgpack_unpack(mrb_state *mrb, mrb_value self)
     mrb->jmp = &c_jmp;
     if (mrb_nil_p(block)) {
       if (ret == MSGPACK_UNPACK_SUCCESS) {
-        unpack_return = mrb_unpack_msgpack_obj(mrb, result.data)
+        unpack_return = mrb_unpack_msgpack_obj(mrb, result.data);
       }
     } else {
       int ai = mrb_gc_arena_save(mrb);
