@@ -200,7 +200,7 @@ mrb_unpack_msgpack_obj(mrb_state *mrb, msgpack_object obj)
     break;
     case MSGPACK_OBJECT_EXT: {
       if (obj.via.ext.type == 1) {
-        return mrb_check_intern(mrb, obj.via.ext.ptr. obj.via.ext.size);
+        return mrb_check_intern(mrb, obj.via.ext.ptr, obj.via.ext.size);
       }
       else {
         mrb_raisef(mrb, E_MSGPACK_ERROR, "Cannot unpack ext type %S", mrb_fixnum_value(obj.via.ext.type));
