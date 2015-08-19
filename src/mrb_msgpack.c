@@ -63,13 +63,8 @@ mrb_msgpack_pack_value(mrb_state *mrb, mrb_value self, msgpack_packer *pk)
   if (mrb_symbol_p(self)) {
     mrb_int len;
     const char *name = mrb_sym2name_len(mrb, mrb_symbol(self), &len);
-    if (is_utf8((unsigned char *) name, (size_t) len) == 0) {
-      msgpack_pack_str(pk, (size_t) len);
-      msgpack_pack_str_body(pk, name, (size_t) len);
-    } else {
-      msgpack_pack_bin(pk, (size_t) len);
-      msgpack_pack_bin_body(pk, name, (size_t) len);
-    }
+    msgpack_pack_ext(pk, (size_t) len, 1);
+    msgpack_pack_ext_body(pk, name, (size_t) len);
   }
   else
   if (mrb_array_p(self))
@@ -202,6 +197,15 @@ mrb_unpack_msgpack_obj(mrb_state *mrb, msgpack_object obj)
     break;
     case MSGPACK_OBJECT_BIN:
       return mrb_str_new(mrb, obj.via.bin.ptr, obj.via.bin.size);
+    break;
+    case MSGPACK_OBJECT_EXT: {
+      if (obj.via.ext.type == 1) {
+        return mrb_check_intern(mrb, obj.via.ext.ptr. obj.via.ext.size);
+      }
+      else {
+        mrb_raisef(mrb, E_MSGPACK_ERROR, "Cannot unpack ext type %S", mrb_fixnum_value(obj.via.ext.type));
+      }
+    }
     break;
     default:
       mrb_raisef(mrb, E_MSGPACK_ERROR, "Cannot unpack type %S", mrb_fixnum_value(obj.type));
