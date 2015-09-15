@@ -26,8 +26,9 @@ typedef struct {
 static inline int
 mrb_msgpack_buffer_write(void* data, const char* buf, size_t len)
 {
-    mrb_str_cat(((mrb_msgpack_buffer*)data)->mrb, ((mrb_msgpack_buffer*)data)->buffer, buf, len);
-    if (mrb->exc)
+    mrb_msgpack_buffer* buffer = (mrb_msgpack_buffer*)data;
+    mrb_str_cat(buffer->mrb, buffer->buffer, buf, len);
+    if (buffer->mrb->exc)
         return -1;
 
     return 0;
