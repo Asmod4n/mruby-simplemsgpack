@@ -132,7 +132,7 @@ mrb_msgpack_pack_hash(mrb_state* mrb, mrb_value self, msgpack_packer* pk)
     }
 }
 
-static mrb_valuef
+static mrb_value
 mrb_msgpack_pack(mrb_state* mrb, mrb_value self)
 {
     msgpack_packer pk;
