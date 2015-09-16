@@ -103,9 +103,11 @@ mrb_msgpack_pack_value(mrb_state* mrb, mrb_value self, msgpack_packer* pk)
                     if (mrb_string_p(s))
                         mrb_msgpack_pack_value(mrb, s, pk);
                     else {
-                        const char* classname = mrb_obj_classname(mrb, self);
-                        msgpack_pack_str(pk, strlen(classname));
-                        msgpack_pack_str_body(pk, classname, strlen(classname));
+                        s = mrb_convert_type(mrb, self, MRB_TT_STRING, "String", "to_s");
+                        if (!mrb_string_p(s))
+                            mrb_raise(mrb, E_ARGUMENT_ERROR, "cannot pack object");
+
+                        mrb_msgpack_pack_value(mrb, s, pk);
                     }
                 }
             }
