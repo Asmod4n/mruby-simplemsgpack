@@ -29,7 +29,7 @@ mrb_msgpack_buffer_write(void* data, const char* buf, size_t len)
 {
     mrb_msgpack_buffer* buffer = (mrb_msgpack_buffer*)data;
     mrb_str_cat(buffer->mrb, buffer->buffer, buf, len);
-    if (buffer->mrb->exc)
+    if (unlikely(buffer->mrb->exc))
         return -1;
 
     return 0;
