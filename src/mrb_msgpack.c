@@ -295,8 +295,7 @@ mrb_msgpack_unpack(mrb_state* mrb, mrb_value self)
     msgpack_unpacked_destroy(&result);
 
     if (unlikely(ret == MSGPACK_UNPACK_NOMEM_ERROR)) {
-        mrb->out_of_memory = TRUE;
-        mrb_exc_raise(mrb, mrb_obj_value(mrb->nomem_err));
+        mrb_sys_fail(mrb, "msgpack_unpack_next");
     }
     if (ret == MSGPACK_UNPACK_PARSE_ERROR)
         mrb_raise(mrb, E_MSGPACK_ERROR, "Invalid data recieved");
