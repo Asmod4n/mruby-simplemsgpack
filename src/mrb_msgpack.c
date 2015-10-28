@@ -1,8 +1,9 @@
-﻿#include <msgpack.h>
+#include <msgpack.h>
 #include <mruby.h>
 #include <mruby/array.h>
 #include <mruby/class.h>
 #include <mruby/data.h>
+#include <mruby/error.h>
 #include <mruby/hash.h>
 #include <mruby/string.h>
 #include <mruby/throw.h>
