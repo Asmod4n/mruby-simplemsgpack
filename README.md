@@ -1,3 +1,4 @@
+[![Build Status](https://travis-ci.org/Asmod4n/mruby-simplemsgpack.svg?branch=master)](https://travis-ci.org/Asmod4n/mruby-simplemsgpack)
 # mruby-simplemsgpack
 
 Prerequisites
