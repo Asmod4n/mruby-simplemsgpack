@@ -65,21 +65,21 @@ mrb_msgpack_pack_value(mrb_state* mrb, mrb_value self, msgpack_packer* pk)
     else if (mrb_symbol_p(self)) {
         mrb_int len;
         const char* name = mrb_sym2name_len(mrb, mrb_symbol(self), &len);
-        msgpack_pack_ext(pk, (size_t)len, 1);
-        msgpack_pack_ext_body(pk, name, (size_t)len);
+        msgpack_pack_ext(pk, len, 1);
+        msgpack_pack_ext_body(pk, name, len);
     }
     else if (mrb_hash_p(self))
         mrb_msgpack_pack_hash(mrb, self, pk);
     else if (mrb_array_p(self))
         mrb_msgpack_pack_array(mrb, self, pk);
     else if (mrb_string_p(self)) {
-        if (is_utf8((unsigned char*)RSTRING_PTR(self), (size_t)RSTRING_LEN(self)) == 0) {
-            msgpack_pack_str(pk, (size_t)RSTRING_LEN(self));
-            msgpack_pack_str_body(pk, RSTRING_PTR(self), (size_t)RSTRING_LEN(self));
+        if (is_utf8((unsigned char*)RSTRING_PTR(self), RSTRING_LEN(self)) == 0) {
+            msgpack_pack_str(pk, RSTRING_LEN(self));
+            msgpack_pack_str_body(pk, RSTRING_PTR(self), RSTRING_LEN(self));
         }
         else {
-            msgpack_pack_bin(pk, (size_t)RSTRING_LEN(self));
-            msgpack_pack_bin_body(pk, RSTRING_PTR(self), (size_t)RSTRING_LEN(self));
+            msgpack_pack_bin(pk, RSTRING_LEN(self));
+            msgpack_pack_bin_body(pk, RSTRING_PTR(self), RSTRING_LEN(self));
         }
     }
     else if (mrb_type(self) == MRB_TT_TRUE)
@@ -119,7 +119,7 @@ mrb_msgpack_pack_value(mrb_state* mrb, mrb_value self, msgpack_packer* pk)
 static inline void
 mrb_msgpack_pack_array(mrb_state* mrb, mrb_value self, msgpack_packer* pk)
 {
-    msgpack_pack_array(pk, (size_t)RARRAY_LEN(self));
+    msgpack_pack_array(pk, RARRAY_LEN(self));
     for (mrb_int i = 0; i != RARRAY_LEN(self); i++)
         mrb_msgpack_pack_value(mrb, mrb_ary_ref(mrb, self, i), pk);
 }
@@ -128,7 +128,7 @@ static inline void
 mrb_msgpack_pack_hash(mrb_state* mrb, mrb_value self, msgpack_packer* pk)
 {
     mrb_value keys = mrb_hash_keys(mrb, self);
-    msgpack_pack_map(pk, (size_t)RARRAY_LEN(keys));
+    msgpack_pack_map(pk, RARRAY_LEN(keys));
     for (mrb_int i = 0; i != RARRAY_LEN(keys); i++) {
         mrb_value key = mrb_ary_ref(mrb, keys, i);
         mrb_msgpack_pack_value(mrb, key, pk);
@@ -213,7 +213,7 @@ static inline mrb_value
 mrb_unpack_msgpack_obj_array(mrb_state* mrb, msgpack_object obj)
 {
     if (likely(obj.via.array.size != 0)) {
-        mrb_value unpacked_array = mrb_ary_new_capa(mrb, (mrb_int)obj.via.array.size);
+        mrb_value unpacked_array = mrb_ary_new_capa(mrb, obj.via.array.size);
         int ai = mrb_gc_arena_save(mrb);
         msgpack_object* p = obj.via.array.ptr;
         msgpack_object* const pend = obj.via.array.ptr + obj.via.array.size;
@@ -232,7 +232,7 @@ static inline mrb_value
 mrb_unpack_msgpack_obj_map(mrb_state* mrb, msgpack_object obj)
 {
     if (likely(obj.via.map.size != 0)) {
-        mrb_value unpacked_hash = mrb_hash_new_capa(mrb, (mrb_int)obj.via.map.size);
+        mrb_value unpacked_hash = mrb_hash_new_capa(mrb, obj.via.map.size);
         int ai = mrb_gc_arena_save(mrb);
         msgpack_object_kv* p = obj.via.map.ptr;
         msgpack_object_kv* const pend = obj.via.map.ptr + obj.via.map.size;
@@ -304,7 +304,7 @@ mrb_msgpack_unpack(mrb_state* mrb, mrb_value self)
     return unpack_return;
 }
 
-void mrb_mruby_msgpack_gem_init(mrb_state* mrb)
+void mrb_mruby_simplemsgpack_gem_init(mrb_state* mrb)
 {
     struct RClass* msgpack_mod;
 
@@ -315,6 +315,6 @@ void mrb_mruby_msgpack_gem_init(mrb_state* mrb)
     mrb_define_module_function(mrb, msgpack_mod, "unpack", mrb_msgpack_unpack, (MRB_ARGS_REQ(1) | MRB_ARGS_BLOCK()));
 }
 
-void mrb_mruby_msgpack_gem_final(mrb_state* mrb)
+void mrb_mruby_simplemsgpack_gem_final(mrb_state* mrb)
 {
 }
