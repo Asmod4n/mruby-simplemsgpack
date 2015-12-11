@@ -102,50 +102,65 @@ mrb_msgpack_pack_hash_value(mrb_state* mrb, mrb_value self, msgpack_packer* pk);
 static inline void
 mrb_msgpack_pack_value(mrb_state* mrb, mrb_value self, msgpack_packer* pk)
 {
-    if (mrb_nil_p(self))
-        msgpack_pack_nil(pk);
-    else if (mrb_type(self) == MRB_TT_FALSE)
-        msgpack_pack_false(pk);
-    else if (mrb_type(self) == MRB_TT_TRUE)
-        msgpack_pack_true(pk);
-    else if (mrb_fixnum_p(self))
-        mrb_msgpack_pack_fixnum_value(self, pk);
-    else if (mrb_symbol_p(self))
-       mrb_msgpack_pack_symbol_value(mrb, self, pk);
-    else if (mrb_float_p(self))
-        mrb_msgpack_pack_float_value(self, pk);
-    else if (mrb_type(self) == MRB_TT_CLASS || mrb_type(self) == MRB_TT_MODULE || mrb_type(self) == MRB_TT_SCLASS)
-        mrb_msgpack_pack_class_value(mrb, self, pk);
-    else if (mrb_array_p(self))
-        mrb_msgpack_pack_array_value(mrb, self, pk);
-    else if (mrb_hash_p(self))
-        mrb_msgpack_pack_hash_value(mrb, self, pk);
-    else if (mrb_string_p(self))
-        mrb_msgpack_pack_string_value(self, pk);
-    else {
-        mrb_value s;
-        s = mrb_check_convert_type(mrb, self, MRB_TT_HASH, "Hash", "to_hash");
-        if (mrb_hash_p(s))
-            mrb_msgpack_pack_hash_value(mrb, s, pk);
-        else {
-            s = mrb_check_convert_type(mrb, self, MRB_TT_ARRAY, "Array", "to_ary");
-            if (mrb_array_p(s))
-                mrb_msgpack_pack_array_value(mrb, s, pk);
+    switch (mrb_type(self)) {
+        case MRB_TT_FALSE: {
+            if (!mrb_fixnum(self))
+                msgpack_pack_nil(pk);
+            else
+                msgpack_pack_false(pk);
+        }
+            break;
+        case MRB_TT_TRUE:
+            msgpack_pack_true(pk);
+            break;
+        case MRB_TT_FIXNUM:
+            mrb_msgpack_pack_fixnum_value(self, pk);
+            break;
+        case MRB_TT_SYMBOL:
+            mrb_msgpack_pack_symbol_value(mrb, self, pk);
+            break;
+        case MRB_TT_FLOAT:
+            mrb_msgpack_pack_float_value(self, pk);
+            break;
+        case MRB_TT_CLASS:
+        case MRB_TT_MODULE:
+        case MRB_TT_SCLASS:
+            mrb_msgpack_pack_class_value(mrb, self, pk);
+            break;
+        case MRB_TT_ARRAY:
+            mrb_msgpack_pack_array_value(mrb, self, pk);
+            break;
+        case MRB_TT_HASH:
+            mrb_msgpack_pack_hash_value(mrb, self, pk);
+            break;
+        case MRB_TT_STRING:
+            mrb_msgpack_pack_string_value(self, pk);
+            break;
+        default: {
+            mrb_value s;
+            s = mrb_check_convert_type(mrb, self, MRB_TT_HASH, "Hash", "to_hash");
+            if (mrb_hash_p(s))
+                mrb_msgpack_pack_hash_value(mrb, s, pk);
             else {
-                s = mrb_check_convert_type(mrb, self, MRB_TT_FIXNUM, "Fixnum", "to_int");
-                if (mrb_fixnum_p(s))
-                    mrb_msgpack_pack_fixnum_value(s, pk);
+                s = mrb_check_convert_type(mrb, self, MRB_TT_ARRAY, "Array", "to_ary");
+                if (mrb_array_p(s))
+                    mrb_msgpack_pack_array_value(mrb, s, pk);
                 else {
-                    s = mrb_check_convert_type(mrb, self, MRB_TT_STRING, "String", "to_str");
-                    if (mrb_string_p(s))
-                        mrb_msgpack_pack_string_value(s, pk);
+                    s = mrb_check_convert_type(mrb, self, MRB_TT_FIXNUM, "Fixnum", "to_int");
+                    if (mrb_fixnum_p(s))
+                        mrb_msgpack_pack_fixnum_value(s, pk);
                     else {
-                        s = mrb_convert_type(mrb, self, MRB_TT_SYMBOL, "String", "to_sym");
-                        if (mrb_symbol_p(s)) {
-                            mrb_msgpack_pack_symbol_value(mrb, self, pk);
-                        } else {
-                            s = mrb_convert_type(mrb, self, MRB_TT_STRING, "String", "to_s");
+                        s = mrb_check_convert_type(mrb, self, MRB_TT_STRING, "String", "to_str");
+                        if (mrb_string_p(s))
                             mrb_msgpack_pack_string_value(s, pk);
+                        else {
+                            s = mrb_check_convert_type(mrb, self, MRB_TT_SYMBOL, "Symbol", "to_sym");
+                            if (mrb_symbol_p(s)) {
+                                mrb_msgpack_pack_symbol_value(mrb, self, pk);
+                            } else {
+                                s = mrb_convert_type(mrb, self, MRB_TT_STRING, "String", "to_s");
+                                mrb_msgpack_pack_string_value(s, pk);
+                            }
                         }
                     }
                 }
