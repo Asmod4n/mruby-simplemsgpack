@@ -72,7 +72,8 @@ mrb_msgpack_pack_string_value(mrb_value self, msgpack_packer* pk)
     if (is_utf8((unsigned char*)RSTRING_PTR(self), RSTRING_LEN(self)) == 0) {
         msgpack_pack_str(pk, RSTRING_LEN(self));
         msgpack_pack_str_body(pk, RSTRING_PTR(self), RSTRING_LEN(self));
-    } else {
+    }
+    else {
         msgpack_pack_bin(pk, RSTRING_LEN(self));
         msgpack_pack_bin_body(pk, RSTRING_PTR(self), RSTRING_LEN(self));
     }
@@ -81,16 +82,11 @@ mrb_msgpack_pack_string_value(mrb_value self, msgpack_packer* pk)
 static inline void
 mrb_msgpack_pack_class_value(mrb_state* mrb, mrb_value self, msgpack_packer* pk)
 {
-    struct RClass *class = mrb_class_ptr(self);
-    const char *classname = mrb_class_name(mrb, class);
+    struct RClass* class = mrb_class_ptr(self);
+    const char* classname = mrb_class_name(mrb, class);
     size_t len = strlen(classname);
-    if (is_utf8((unsigned char*)classname, len) == 0) {
-        msgpack_pack_str(pk, len);
-        msgpack_pack_str_body(pk, classname, len);
-    } else {
-        msgpack_pack_bin(pk, len);
-        msgpack_pack_bin_body(pk, classname, len);
-    }
+    msgpack_pack_ext(pk, len, 2);
+    msgpack_pack_ext_body(pk, classname, len);
 }
 
 static inline void
@@ -103,69 +99,69 @@ static inline void
 mrb_msgpack_pack_value(mrb_state* mrb, mrb_value self, msgpack_packer* pk)
 {
     switch (mrb_type(self)) {
-        case MRB_TT_FALSE: {
-            if (!mrb_fixnum(self))
-                msgpack_pack_nil(pk);
-            else
-                msgpack_pack_false(pk);
-        }
-            break;
-        case MRB_TT_TRUE:
-            msgpack_pack_true(pk);
-            break;
-        case MRB_TT_FIXNUM:
-            mrb_msgpack_pack_fixnum_value(self, pk);
-            break;
-        case MRB_TT_SYMBOL:
-            mrb_msgpack_pack_symbol_value(mrb, self, pk);
-            break;
-        case MRB_TT_FLOAT:
-            mrb_msgpack_pack_float_value(self, pk);
-            break;
-        case MRB_TT_CLASS:
-        case MRB_TT_MODULE:
-        case MRB_TT_SCLASS:
-            mrb_msgpack_pack_class_value(mrb, self, pk);
-            break;
-        case MRB_TT_ARRAY:
-            mrb_msgpack_pack_array_value(mrb, self, pk);
-            break;
-        case MRB_TT_HASH:
-            mrb_msgpack_pack_hash_value(mrb, self, pk);
-            break;
-        case MRB_TT_STRING:
-            mrb_msgpack_pack_string_value(self, pk);
-            break;
-        default: {
-            mrb_value s;
-            s = mrb_check_convert_type(mrb, self, MRB_TT_HASH, "Hash", "to_hash");
-            if (mrb_hash_p(s))
-                mrb_msgpack_pack_hash_value(mrb, s, pk);
+    case MRB_TT_FALSE: {
+        if (!mrb_fixnum(self))
+            msgpack_pack_nil(pk);
+        else
+            msgpack_pack_false(pk);
+    } break;
+    case MRB_TT_TRUE:
+        msgpack_pack_true(pk);
+        break;
+    case MRB_TT_FIXNUM:
+        mrb_msgpack_pack_fixnum_value(self, pk);
+        break;
+    case MRB_TT_SYMBOL:
+        mrb_msgpack_pack_symbol_value(mrb, self, pk);
+        break;
+    case MRB_TT_FLOAT:
+        mrb_msgpack_pack_float_value(self, pk);
+        break;
+    case MRB_TT_CLASS:
+    case MRB_TT_MODULE:
+    case MRB_TT_SCLASS:
+        mrb_msgpack_pack_class_value(mrb, self, pk);
+        break;
+    case MRB_TT_ARRAY:
+        mrb_msgpack_pack_array_value(mrb, self, pk);
+        break;
+    case MRB_TT_HASH:
+        mrb_msgpack_pack_hash_value(mrb, self, pk);
+        break;
+    case MRB_TT_STRING:
+        mrb_msgpack_pack_string_value(self, pk);
+        break;
+    default: {
+        mrb_value s;
+        s = mrb_check_convert_type(mrb, self, MRB_TT_HASH, "Hash", "to_hash");
+        if (mrb_hash_p(s))
+            mrb_msgpack_pack_hash_value(mrb, s, pk);
+        else {
+            s = mrb_check_convert_type(mrb, self, MRB_TT_ARRAY, "Array", "to_ary");
+            if (mrb_array_p(s))
+                mrb_msgpack_pack_array_value(mrb, s, pk);
             else {
-                s = mrb_check_convert_type(mrb, self, MRB_TT_ARRAY, "Array", "to_ary");
-                if (mrb_array_p(s))
-                    mrb_msgpack_pack_array_value(mrb, s, pk);
+                s = mrb_check_convert_type(mrb, self, MRB_TT_FIXNUM, "Fixnum", "to_int");
+                if (mrb_fixnum_p(s))
+                    mrb_msgpack_pack_fixnum_value(s, pk);
                 else {
-                    s = mrb_check_convert_type(mrb, self, MRB_TT_FIXNUM, "Fixnum", "to_int");
-                    if (mrb_fixnum_p(s))
-                        mrb_msgpack_pack_fixnum_value(s, pk);
+                    s = mrb_check_convert_type(mrb, self, MRB_TT_STRING, "String", "to_str");
+                    if (mrb_string_p(s))
+                        mrb_msgpack_pack_string_value(s, pk);
                     else {
-                        s = mrb_check_convert_type(mrb, self, MRB_TT_STRING, "String", "to_str");
-                        if (mrb_string_p(s))
-                            mrb_msgpack_pack_string_value(s, pk);
+                        s = mrb_check_convert_type(mrb, self, MRB_TT_SYMBOL, "Symbol", "to_sym");
+                        if (mrb_symbol_p(s)) {
+                            mrb_msgpack_pack_symbol_value(mrb, self, pk);
+                        }
                         else {
-                            s = mrb_check_convert_type(mrb, self, MRB_TT_SYMBOL, "Symbol", "to_sym");
-                            if (mrb_symbol_p(s)) {
-                                mrb_msgpack_pack_symbol_value(mrb, self, pk);
-                            } else {
-                                s = mrb_convert_type(mrb, self, MRB_TT_STRING, "String", "to_s");
-                                mrb_msgpack_pack_string_value(s, pk);
-                            }
+                            s = mrb_convert_type(mrb, self, MRB_TT_STRING, "String", "to_s");
+                            mrb_msgpack_pack_string_value(s, pk);
                         }
                     }
                 }
             }
         }
+    }
     }
 }
 
@@ -345,7 +341,6 @@ mrb_msgpack_pack_class(mrb_state* mrb, mrb_value self)
     return data.buffer;
 }
 
-
 static inline mrb_value
 mrb_unpack_msgpack_obj_array(mrb_state* mrb, msgpack_object obj);
 
@@ -393,9 +388,15 @@ mrb_unpack_msgpack_obj(mrb_state* mrb, msgpack_object obj)
         return mrb_str_new(mrb, obj.via.bin.ptr, obj.via.bin.size);
         break;
     case MSGPACK_OBJECT_EXT: {
-        if (obj.via.ext.type == 1) {
+        switch (obj.via.ext.type) {
+        case 1:
             return mrb_check_intern(mrb, obj.via.ext.ptr, obj.via.ext.size);
-        } else {
+            break;
+        case 2: {
+            mrb_value classname_obj = mrb_str_new_static(mrb, obj.via.ext.ptr, obj.via.ext.size);
+            return mrb_funcall(mrb, classname_obj, "constantize", 0);
+        } break;
+        default:
             mrb_raisef(mrb, E_MSGPACK_ERROR, "Cannot unpack ext type %S", mrb_fixnum_value(obj.via.ext.type));
         }
     } break;
