@@ -152,7 +152,7 @@ mrb_msgpack_pack_value(mrb_state* mrb, mrb_value self, msgpack_packer* pk)
                         } else {
                             try_convert = mrb_check_convert_type(mrb, self, MRB_TT_SYMBOL, "Symbol", "to_sym");
                             if (mrb_symbol_p(try_convert)) {
-                                mrb_msgpack_pack_symbol_value(mrb, self, pk);
+                                mrb_msgpack_pack_symbol_value(mrb, try_convert, pk);
                             } else {
                                 try_convert = mrb_convert_type(mrb, self, MRB_TT_STRING, "String", "to_s");
                                 mrb_msgpack_pack_string_value(try_convert, pk);
