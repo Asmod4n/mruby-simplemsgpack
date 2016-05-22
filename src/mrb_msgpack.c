@@ -24,19 +24,19 @@ typedef struct {
 #define unlikely(x) (x)
 #endif
 
-static inline int
+MRB_INLINE int
 mrb_msgpack_data_write(void* data, const char* buf, size_t len)
 {
     mrb_msgpack_data* mrb_data = (mrb_msgpack_data*)data;
     mrb_str_cat(mrb_data->mrb, mrb_data->buffer, buf, len);
     if (unlikely(mrb_data->mrb->exc)) {
         return -1;
+    } else {
+        return 0;
     }
-
-    return 0;
 }
 
-static inline void
+MRB_INLINE void
 mrb_msgpack_pack_fixnum_value(mrb_value self, msgpack_packer* pk)
 {
 #ifdef MRB_INT16
@@ -48,7 +48,7 @@ mrb_msgpack_pack_fixnum_value(mrb_value self, msgpack_packer* pk)
 #endif
 }
 
-static inline void
+MRB_INLINE void
 mrb_msgpack_pack_float_value(mrb_value self, msgpack_packer* pk)
 {
 #ifdef MRB_USE_FLOAT
@@ -58,7 +58,7 @@ mrb_msgpack_pack_float_value(mrb_value self, msgpack_packer* pk)
 #endif
 }
 
-static inline void
+MRB_INLINE void
 mrb_msgpack_pack_symbol_value(mrb_state* mrb, mrb_value self, msgpack_packer* pk)
 {
     mrb_int len;
@@ -67,7 +67,7 @@ mrb_msgpack_pack_symbol_value(mrb_state* mrb, mrb_value self, msgpack_packer* pk
     msgpack_pack_ext_body(pk, name, len);
 }
 
-static inline void
+MRB_INLINE void
 mrb_msgpack_pack_string_value(mrb_value self, msgpack_packer* pk)
 {
     if (is_utf8((unsigned char*)RSTRING_PTR(self), RSTRING_LEN(self)) == 0) {
@@ -79,7 +79,7 @@ mrb_msgpack_pack_string_value(mrb_value self, msgpack_packer* pk)
     }
 }
 
-static inline void
+MRB_INLINE void
 mrb_msgpack_pack_class_value(mrb_state* mrb, mrb_value self, msgpack_packer* pk)
 {
     struct RClass* mrb_class = mrb_class_ptr(self);
@@ -89,13 +89,13 @@ mrb_msgpack_pack_class_value(mrb_state* mrb, mrb_value self, msgpack_packer* pk)
     msgpack_pack_ext_body(pk, class_name, len);
 }
 
-static inline void
+MRB_INLINE void
 mrb_msgpack_pack_array_value(mrb_state* mrb, mrb_value self, msgpack_packer* pk);
 
-static inline void
+MRB_INLINE void
 mrb_msgpack_pack_hash_value(mrb_state* mrb, mrb_value self, msgpack_packer* pk);
 
-static inline void
+MRB_INLINE void
 mrb_msgpack_pack_value(mrb_state* mrb, mrb_value self, msgpack_packer* pk)
 {
     switch (mrb_type(self)) {
@@ -165,7 +165,7 @@ mrb_msgpack_pack_value(mrb_state* mrb, mrb_value self, msgpack_packer* pk)
     }
 }
 
-static inline void
+MRB_INLINE void
 mrb_msgpack_pack_array_value(mrb_state* mrb, mrb_value self, msgpack_packer* pk)
 {
     msgpack_pack_array(pk, RARRAY_LEN(self));
@@ -174,7 +174,7 @@ mrb_msgpack_pack_array_value(mrb_state* mrb, mrb_value self, msgpack_packer* pk)
     }
 }
 
-static inline void
+MRB_INLINE void
 mrb_msgpack_pack_hash_value(mrb_state* mrb, mrb_value self, msgpack_packer* pk)
 {
     int ai = mrb_gc_arena_save(mrb);
@@ -342,13 +342,13 @@ mrb_msgpack_pack_class(mrb_state* mrb, mrb_value self)
     return data.buffer;
 }
 
-static inline mrb_value
+MRB_INLINE mrb_value
 mrb_unpack_msgpack_obj_array(mrb_state* mrb, msgpack_object obj);
 
-static inline mrb_value
+MRB_INLINE mrb_value
 mrb_unpack_msgpack_obj_map(mrb_state* mrb, msgpack_object obj);
 
-static inline mrb_value
+MRB_INLINE mrb_value
 mrb_unpack_msgpack_obj(mrb_state* mrb, msgpack_object obj)
 {
     switch (obj.type) {
@@ -411,7 +411,7 @@ mrb_unpack_msgpack_obj(mrb_state* mrb, msgpack_object obj)
     }
 }
 
-static inline mrb_value
+MRB_INLINE mrb_value
 mrb_unpack_msgpack_obj_array(mrb_state* mrb, msgpack_object obj)
 {
     if (obj.via.array.size != 0) {
@@ -429,7 +429,7 @@ mrb_unpack_msgpack_obj_array(mrb_state* mrb, msgpack_object obj)
     }
 }
 
-static inline mrb_value
+MRB_INLINE mrb_value
 mrb_unpack_msgpack_obj_map(mrb_state* mrb, msgpack_object obj)
 {
     if (obj.via.map.size != 0) {
@@ -451,7 +451,7 @@ mrb_unpack_msgpack_obj_map(mrb_state* mrb, msgpack_object obj)
 static mrb_value
 mrb_msgpack_unpack(mrb_state* mrb, mrb_value self)
 {
-    mrb_value data, block;
+    mrb_value data, block = mrb_nil_value();
 
     mrb_get_args(mrb, "o&", &data, &block);
 
@@ -506,7 +506,8 @@ mrb_msgpack_unpack(mrb_state* mrb, mrb_value self)
     return unpack_return;
 }
 
-void mrb_mruby_simplemsgpack_gem_init(mrb_state* mrb)
+void
+mrb_mruby_simplemsgpack_gem_init(mrb_state* mrb)
 {
     struct RClass* msgpack_mod;
 
@@ -525,9 +526,7 @@ void mrb_mruby_simplemsgpack_gem_init(mrb_state* mrb)
 
     msgpack_mod = mrb_define_module(mrb, "MessagePack");
     mrb_define_class_under(mrb, msgpack_mod, "Error", E_RUNTIME_ERROR);
-    mrb_define_module_function(mrb, msgpack_mod, "unpack", mrb_msgpack_unpack, (MRB_ARGS_REQ(1) | MRB_ARGS_BLOCK()));
+    mrb_define_module_function(mrb, msgpack_mod, "unpack", mrb_msgpack_unpack, (MRB_ARGS_REQ(1)|MRB_ARGS_BLOCK()));
 }
 
-void mrb_mruby_simplemsgpack_gem_final(mrb_state* mrb)
-{
-}
+void mrb_mruby_simplemsgpack_gem_final(mrb_state* mrb) { }
