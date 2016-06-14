@@ -3,5 +3,6 @@ MRuby::Gem::Specification.new('mruby-simplemsgpack') do |spec|
   spec.author  = 'Hendrik Beskow'
   spec.summary = 'mruby bindings for msgpack'
   spec.add_dependency 'mruby-errno'
+  spec.add_dependency 'mruby-string-is-utf8'
   spec.add_conflict 'mruby-msgpack'
 end

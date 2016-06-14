@@ -6,10 +6,10 @@
 #include <mruby/error.h>
 #include <mruby/hash.h>
 #include <mruby/string.h>
+#include <mruby/string_is_utf8.h>
 #include <mruby/throw.h>
 #include <mruby/variable.h>
 #include "mruby/msgpack.h"
-#include "is_utf8.h"
 
 typedef struct {
     mrb_state* mrb;
@@ -70,7 +70,7 @@ mrb_msgpack_pack_symbol_value(mrb_state* mrb, mrb_value self, msgpack_packer* pk
 MRB_INLINE void
 mrb_msgpack_pack_string_value(mrb_value self, msgpack_packer* pk)
 {
-    if (is_utf8((unsigned char*)RSTRING_PTR(self), RSTRING_LEN(self)) == 0) {
+    if (mrb_str_is_utf8(self)) {
         msgpack_pack_str(pk, RSTRING_LEN(self));
         msgpack_pack_str_body(pk, RSTRING_PTR(self), RSTRING_LEN(self));
     } else {
@@ -453,9 +453,7 @@ mrb_msgpack_unpack(mrb_state* mrb, mrb_value self)
 {
     mrb_value data, block = mrb_nil_value();
 
-    mrb_get_args(mrb, "o&", &data, &block);
-
-    data = mrb_str_to_str(mrb, data);
+    mrb_get_args(mrb, "S&", &data, &block);
 
     msgpack_unpacked result;
     size_t off = 0;
