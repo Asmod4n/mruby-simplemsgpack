@@ -453,7 +453,9 @@ mrb_msgpack_unpack(mrb_state* mrb, mrb_value self)
 {
     mrb_value data, block = mrb_nil_value();
 
-    mrb_get_args(mrb, "S&", &data, &block);
+    mrb_get_args(mrb, "o&", &data, &block);
+
+    data = mrb_str_to_str(mrb, data);
 
     msgpack_unpacked result;
     size_t off = 0;
