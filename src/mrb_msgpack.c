@@ -59,11 +59,15 @@ mrb_msgpack_pack_float_value(mrb_value self, msgpack_packer* pk)
 }
 
 MRB_INLINE void
-mrb_msgpack_pack_symbol_value(mrb_state* mrb, mrb_value self, msgpack_packer* pk)
+mrb_msgpack_pack_symbol_value(mrb_state* mrb, mrb_value self, mrb_bool force, msgpack_packer* pk)
 {
     mrb_int len;
     const char* name = mrb_sym2name_len(mrb, mrb_symbol(self), &len);
-    msgpack_pack_ext(pk, len, 1);
+    if (force) {
+        msgpack_pack_ext(pk, len, 3);
+    } else {
+        msgpack_pack_ext(pk, len, 1);
+    }
     msgpack_pack_ext_body(pk, name, len);
 }
 
@@ -113,7 +117,7 @@ mrb_msgpack_pack_value(mrb_state* mrb, mrb_value self, msgpack_packer* pk)
             mrb_msgpack_pack_fixnum_value(self, pk);
             break;
         case MRB_TT_SYMBOL:
-            mrb_msgpack_pack_symbol_value(mrb, self, pk);
+            mrb_msgpack_pack_symbol_value(mrb, self, FALSE, pk);
             break;
         case MRB_TT_FLOAT:
             mrb_msgpack_pack_float_value(self, pk);
@@ -152,7 +156,7 @@ mrb_msgpack_pack_value(mrb_state* mrb, mrb_value self, msgpack_packer* pk)
                         } else {
                             try_convert = mrb_check_convert_type(mrb, self, MRB_TT_SYMBOL, "Symbol", "to_sym");
                             if (mrb_symbol_p(try_convert)) {
-                                mrb_msgpack_pack_symbol_value(mrb, try_convert, pk);
+                                mrb_msgpack_pack_symbol_value(mrb, try_convert, FALSE, pk);
                             } else {
                                 try_convert = mrb_convert_type(mrb, self, MRB_TT_STRING, "String", "to_s");
                                 mrb_msgpack_pack_string_value(try_convert, pk);
@@ -323,7 +327,11 @@ mrb_msgpack_pack_symbol(mrb_state* mrb, mrb_value self)
     data.buffer = mrb_str_new(mrb, NULL, 0);
     msgpack_packer_init(&pk, &data, mrb_msgpack_data_write);
 
-    mrb_msgpack_pack_symbol_value(mrb, self, &pk);
+    mrb_bool force = FALSE;
+
+    mrb_get_args(mrb, "|b", &force);
+
+    mrb_msgpack_pack_symbol_value(mrb, self, force, &pk);
 
     return data.buffer;
 }
@@ -399,6 +407,9 @@ mrb_unpack_msgpack_obj(mrb_state* mrb, msgpack_object obj)
                 case 2: {
                     mrb_value classname_obj = mrb_str_new_static(mrb, obj.via.ext.ptr, obj.via.ext.size);
                     return mrb_funcall(mrb, classname_obj, "constantize", 0);
+                } break;
+                case 3: {
+                    return mrb_symbol_value(mrb_intern(mrb, obj.via.ext.ptr, obj.via.ext.size));
                 } break;
                 default: {
                     mrb_warn(mrb, "Cannot unpack ext type %S, returning a raw string", mrb_fixnum_value(obj.via.ext.type));
@@ -520,7 +531,7 @@ mrb_mruby_simplemsgpack_gem_init(mrb_state* mrb)
     mrb_define_method(mrb, mrb->true_class, "to_msgpack", mrb_msgpack_pack_true, MRB_ARGS_NONE());
     mrb_define_method(mrb, mrb->false_class, "to_msgpack", mrb_msgpack_pack_false, MRB_ARGS_NONE());
     mrb_define_method(mrb, mrb->nil_class, "to_msgpack", mrb_msgpack_pack_nil, MRB_ARGS_NONE());
-    mrb_define_method(mrb, mrb->symbol_class, "to_msgpack", mrb_msgpack_pack_symbol, MRB_ARGS_NONE());
+    mrb_define_method(mrb, mrb->symbol_class, "to_msgpack", mrb_msgpack_pack_symbol, MRB_ARGS_OPT(1));
     mrb_define_method(mrb, mrb->class_class, "to_msgpack", mrb_msgpack_pack_class, MRB_ARGS_NONE());
     mrb_define_method(mrb, mrb->module_class, "to_msgpack", mrb_msgpack_pack_class, MRB_ARGS_NONE());
 
