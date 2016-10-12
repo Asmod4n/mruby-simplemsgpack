@@ -41,3 +41,60 @@ assert("Hash#to_msgpack") do
   assert_equal(hash, MessagePack.unpack(hash.to_msgpack))
 end
 
+assert("Module#to_msgpack") do
+  assert_equal('MessagePack::Error', MessagePack.unpack(MessagePack::Error.to_msgpack))
+end
+
+assert("MessagePack.register_pack_type") do
+  assert_raise(MessagePack::Error, "ext type out of range") do
+    MessagePack.register_pack_type(-1, Symbol)
+  end
+
+  assert_raise(MessagePack::Error, "ext type out of range") do
+    MessagePack.register_pack_type(128, Symbol)
+  end
+
+  assert_raise(MessagePack::Error, "no block given") do
+    MessagePack.register_pack_type(1, Symbol)
+  end
+
+  assert_nil(MessagePack.register_pack_type(1, Symbol) {})
+end
+
+assert("MessagePack.register_unpack_type") do
+  assert_raise(MessagePack::Error, "ext type out of range") do
+    MessagePack.register_unpack_type(-1)
+  end
+
+  assert_raise(MessagePack::Error, "ext type out of range") do
+    MessagePack.register_unpack_type(128)
+  end
+
+  assert_raise(MessagePack::Error, "no block given") do
+    MessagePack.register_unpack_type(1)
+  end
+
+  assert_nil(MessagePack.register_unpack_type(1) {})
+end
+
+assert("Symbol#to_msgpack with registered ext type") do
+  MessagePack.register_pack_type(0, Symbol) { |symbol| symbol.to_s }
+  MessagePack.register_unpack_type(0) { |data| data.to_sym }
+  assert_equal(:symbol, MessagePack.unpack(:symbol.to_msgpack))
+
+  hash = { key: 123, nested: [:array] }
+  assert_equal(hash, MessagePack.unpack(hash.to_msgpack))
+end
+
+assert("Class#to_msgpack with registered ext type") do
+  MessagePack.register_pack_type(0, Class) { |mod| mod.to_s }
+  MessagePack.register_unpack_type(0) { |data| data.constantize }
+  assert_equal(MessagePack::Error, MessagePack.unpack(MessagePack::Error.to_msgpack))
+end
+
+assert("Registered ext type for one of the core types is ignored") do
+  MessagePack.register_pack_type(0, Array) { |array| nil }
+  MessagePack.register_unpack_type(0) { |data| nil }
+  assert_equal(['item'], MessagePack.unpack(['item'].to_msgpack))
+end
+
