@@ -517,7 +517,7 @@ mrb_msgpack_register_unpack_type(mrb_state* mrb, mrb_value self)
 }
 
 void
-mrb_mruby_simplemsgpack_gem_init(mrb_state* mrb)
+mrb_mruby_simplemsgpack_ext_gem_init(mrb_state* mrb)
 {
     struct RClass* msgpack_mod;
 
@@ -541,4 +541,4 @@ mrb_mruby_simplemsgpack_gem_init(mrb_state* mrb)
     mrb_define_module_function(mrb, msgpack_mod, "register_unpack_type", mrb_msgpack_register_unpack_type, (MRB_ARGS_REQ(1)|MRB_ARGS_BLOCK()));
 }
 
-void mrb_mruby_simplemsgpack_gem_final(mrb_state* mrb) { }
+void mrb_mruby_simplemsgpack_ext_gem_final(mrb_state* mrb) { }
