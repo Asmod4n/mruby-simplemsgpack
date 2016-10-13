@@ -98,3 +98,28 @@ assert("Registered ext type for one of the core types is ignored") do
   assert_equal(['item'], MessagePack.unpack(['item'].to_msgpack))
 end
 
+assert("Extension types are inherited") do
+  class Test
+    def initialize(id)
+      @id = id
+    end
+
+    attr_reader :id
+
+    def ==(other)
+      self.class == other.class and @id == id
+    end
+  end
+
+  class InheritsTest < Test; end
+
+  MessagePack.register_pack_type(0, Test) { |test| test.class.to_s + '#' + test.id }
+  MessagePack.register_unpack_type(0) do |data|
+    class_name, id = data.split('#')
+    class_name.constantize.new(id)
+  end
+
+  assert_equal(Test.new('test'), MessagePack.unpack(Test.new('test').to_msgpack))
+  assert_equal(InheritsTest.new('inherited'), MessagePack.unpack(InheritsTest.new('inherited').to_msgpack))
+end
+

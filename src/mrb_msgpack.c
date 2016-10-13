@@ -77,7 +77,26 @@ MRB_INLINE mrb_value
 mrb_msgpack_get_ext_config(mrb_state* mrb, mrb_value obj)
 {
     mrb_value obj_class = mrb_obj_value(mrb_obj_class(mrb, obj));
-    return mrb_hash_get(mrb, pack_ext_registry, obj_class);
+    mrb_value ext_config = mrb_hash_get(mrb, pack_ext_registry, obj_class);
+
+    if (!mrb_nil_p(ext_config)) {
+        return ext_config;
+    }
+
+    mrb_value ext_type_classes = mrb_funcall(mrb, pack_ext_registry, "keys", 0);
+    mrb_int classes_count = mrb_ary_ptr(ext_type_classes)->len;
+
+    for (mrb_int i = 0; i < classes_count; i += 1) {
+        mrb_value ext_type_class = mrb_ary_ref(mrb, ext_type_classes, i);
+
+        if (mrb_obj_is_kind_of(mrb, obj, mrb_class_ptr(ext_type_class))) {
+            ext_config = mrb_hash_get(mrb, pack_ext_registry, ext_type_class);
+            mrb_hash_set(mrb, pack_ext_registry, obj_class, ext_config);
+            return ext_config;
+        }
+    }
+
+    return mrb_nil_value();
 }
 
 MRB_INLINE int
