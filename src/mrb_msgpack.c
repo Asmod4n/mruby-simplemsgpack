@@ -119,7 +119,7 @@ mrb_msgpack_pack_ext_value(mrb_state* mrb, mrb_value self, msgpack_packer* pk)
         mrb_raise(mrb, E_MSGPACK_ERROR, "no string returned by ext type packer");
     }
 
-    body = mrb_string_value_ptr(mrb, packed);
+    body = mrb_str_to_cstr(mrb, packed);
     len = strlen(body);
 
     msgpack_pack_ext(pk, len, mrb_fixnum(type));
