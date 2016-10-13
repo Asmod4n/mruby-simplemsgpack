@@ -73,11 +73,21 @@ mrb_msgpack_pack_string_value(mrb_value self, msgpack_packer* pk)
     }
 }
 
-MRB_INLINE void
+MRB_INLINE mrb_value
+mrb_msgpack_get_ext_config(mrb_state* mrb, mrb_value obj)
+{
+    mrb_value obj_class = mrb_obj_value(mrb_obj_class(mrb, obj));
+    return mrb_hash_get(mrb, pack_ext_registry, obj_class);
+}
+
+MRB_INLINE int
 mrb_msgpack_pack_ext_value(mrb_state* mrb, mrb_value self, msgpack_packer* pk)
 {
-    mrb_value mrb_class = mrb_obj_value(mrb_obj_class(mrb, self));
-    mrb_value ext_config = mrb_hash_get(mrb, pack_ext_registry, mrb_class);
+    mrb_value ext_config = mrb_msgpack_get_ext_config(mrb, self);
+
+    if (mrb_nil_p(ext_config)) {
+        return 0;
+    }
 
     mrb_value type = mrb_hash_get(mrb, ext_config, mrb_symbol_value(mrb_intern_lit(mrb, "type")));
     mrb_value packer = mrb_hash_get(mrb, ext_config, mrb_symbol_value(mrb_intern_lit(mrb, "packer")));
@@ -95,6 +105,8 @@ mrb_msgpack_pack_ext_value(mrb_state* mrb, mrb_value self, msgpack_packer* pk)
 
     msgpack_pack_ext(pk, len, mrb_fixnum(type));
     msgpack_pack_ext_body(pk, body, len);
+
+    return 1;
 }
 
 MRB_INLINE void
@@ -133,11 +145,7 @@ mrb_msgpack_pack_value(mrb_state* mrb, mrb_value self, msgpack_packer* pk)
             mrb_msgpack_pack_string_value(self, pk);
             break;
         default: {
-            mrb_value mrb_class = mrb_obj_value(mrb_obj_class(mrb, self));
-            mrb_value ext_config = mrb_hash_get(mrb, pack_ext_registry, mrb_class);
-            if (!mrb_nil_p(ext_config)) {
-                mrb_msgpack_pack_ext_value(mrb, self, pk);
-            } else {
+            if (!mrb_msgpack_pack_ext_value(mrb, self, pk)) {
                 mrb_value try_convert;
                 try_convert = mrb_check_convert_type(mrb, self, MRB_TT_HASH, "Hash", "to_hash");
                 if (mrb_hash_p(try_convert)) {
