@@ -88,7 +88,7 @@ mrb_msgpack_get_ext_config(mrb_state* mrb, mrb_value obj)
     }
 
     mrb_value ext_type_classes = mrb_funcall(mrb, ext_registry.packers, "keys", 0);
-    mrb_int classes_count = mrb_ary_ptr(ext_type_classes)->len;
+    mrb_int classes_count = RARRAY_LEN(ext_type_classes);
 
     for (mrb_int i = 0; i < classes_count; i += 1) {
         mrb_value ext_type_class = mrb_ary_ref(mrb, ext_type_classes, i);
@@ -495,7 +495,7 @@ mrb_msgpack_unpack(mrb_state* mrb, mrb_value self)
         mrb_sys_fail(mrb, "msgpack_unpack_next");
     }
     if (ret == MSGPACK_UNPACK_PARSE_ERROR) {
-        mrb_raise(mrb, E_MSGPACK_ERROR, "Invalid data recieved");
+        mrb_raise(mrb, E_MSGPACK_ERROR, "Invalid data received");
     }
 
     return unpack_return;
