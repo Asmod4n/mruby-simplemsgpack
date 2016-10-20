@@ -393,7 +393,7 @@ mrb_unpack_msgpack_obj(mrb_state* mrb, msgpack_object obj)
             break;
         case MSGPACK_OBJECT_EXT: {
             mrb_value unpacker = mrb_hash_get(mrb, ext_unpackers, mrb_fixnum_value(obj.via.ext.type));
-            mrb_value data = mrb_str_new_static(mrb, obj.via.ext.ptr, obj.via.ext.size);
+            mrb_value data = mrb_str_new(mrb, obj.via.ext.ptr, obj.via.ext.size);
 
             return mrb_yield(mrb, unpacker, data);
         } break;
