@@ -440,6 +440,24 @@ mrb_unpack_msgpack_obj_map(mrb_state* mrb, msgpack_object obj)
 }
 
 static mrb_value
+mrb_msgpack_pack(mrb_state* mrb, mrb_value self)
+{
+    mrb_value object;
+
+    mrb_get_args(mrb, "o", &object);
+
+    msgpack_packer pk;
+    mrb_msgpack_data data;
+    data.mrb = mrb;
+    data.buffer = mrb_str_new(mrb, NULL, 0);
+    msgpack_packer_init(&pk, &data, mrb_msgpack_data_write);
+
+    mrb_msgpack_pack_value(mrb, object, &pk);
+
+    return data.buffer;
+}
+
+static mrb_value
 mrb_msgpack_unpack(mrb_state* mrb, mrb_value self)
 {
     mrb_value data, block = mrb_nil_value();
@@ -570,6 +588,7 @@ mrb_mruby_simplemsgpack_ext_gem_init(mrb_state* mrb)
     mrb_iv_set(mrb, mrb_obj_value(msgpack_mod), mrb_intern_lit(mrb, "ext_packers"), ext_packers);
     mrb_iv_set(mrb, mrb_obj_value(msgpack_mod), mrb_intern_lit(mrb, "ext_unpackers"), ext_unpackers);
 
+    mrb_define_module_function(mrb, msgpack_mod, "pack", mrb_msgpack_pack, (MRB_ARGS_REQ(1)));
     mrb_define_module_function(mrb, msgpack_mod, "unpack", mrb_msgpack_unpack, (MRB_ARGS_ARG(1, 0)|MRB_ARGS_BLOCK()));
     mrb_define_module_function(mrb, msgpack_mod, "register_pack_type", mrb_msgpack_register_pack_type, (MRB_ARGS_REQ(2)|MRB_ARGS_BLOCK()));
     mrb_define_module_function(mrb, msgpack_mod, "register_unpack_type", mrb_msgpack_register_unpack_type, (MRB_ARGS_REQ(1)|MRB_ARGS_BLOCK()));

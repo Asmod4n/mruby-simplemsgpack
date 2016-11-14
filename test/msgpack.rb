@@ -1,17 +1,21 @@
 assert("NilClass#to_msgpack") do
   assert_equal(nil, MessagePack.unpack(nil.to_msgpack))
+  assert_equal(nil, MessagePack.unpack(MessagePack.pack(nil)))
 end
 
 assert("FalseClass#to_msgpack") do
   assert_equal(false, MessagePack.unpack(false.to_msgpack))
+  assert_equal(false, MessagePack.unpack(MessagePack.pack(false)))
 end
 
 assert("TrueClass#to_msgpack") do
   assert_equal(true, MessagePack.unpack(true.to_msgpack))
+  assert_equal(true, MessagePack.unpack(MessagePack.pack(true)))
 end
 
 assert("Integer#to_msgpack") do
   assert_equal(1, MessagePack.unpack(1.to_msgpack))
+  assert_equal(1, MessagePack.unpack(MessagePack.pack(1)))
   assert_equal(-1, MessagePack.unpack(-1.to_msgpack))
   assert_equal(-2**63, MessagePack.unpack((-2**63).to_msgpack))
   assert_equal(2**64-1, MessagePack.unpack((2**64-1).to_msgpack))
@@ -19,26 +23,31 @@ end
 
 assert("Float#to_msgpack") do
   assert_equal(1.2, MessagePack.unpack(1.2.to_msgpack))
+  assert_equal(1.2, MessagePack.unpack(MessagePack.pack(1.2)))
   assert_equal(1.7976931348623157e+308, MessagePack.unpack(1.7976931348623157e+308.to_msgpack))
   assert_equal(2.2250738585072014e-308, MessagePack.unpack(2.2250738585072014e-308.to_msgpack))
 end
 
 assert("String#to_msgpack") do
   assert_equal('string', MessagePack.unpack('string'.to_msgpack))
+  assert_equal('string', MessagePack.unpack(MessagePack.pack('string')))
 end
 
 assert("Symbol#to_msgpack") do
   assert_equal('symbol', MessagePack.unpack(:symbol.to_msgpack))
+  assert_equal('symbol', MessagePack.unpack(MessagePack.pack(:symbol)))
 end
 
 assert("Array#to_msgpack") do
   array = [nil, false, true, 1, -1, 1.2, "string", [], {}]
   assert_equal(array, MessagePack.unpack(array.to_msgpack))
+  assert_equal(array, MessagePack.unpack(MessagePack.pack(array)))
 end
 
 assert("Hash#to_msgpack") do
   hash = { nil => nil, false => false, true => true, 1 => 1, 1.2 => 1.2, "string" => "string", [] => [], {} => {} }
   assert_equal(hash, MessagePack.unpack(hash.to_msgpack))
+  assert_equal(hash, MessagePack.unpack(MessagePack.pack(hash)))
 end
 
 assert("Module#to_msgpack") do
@@ -84,6 +93,7 @@ assert("Symbol#to_msgpack with registered ext type") do
 
   hash = { key: 123, nested: [:array] }
   assert_equal(hash, MessagePack.unpack(hash.to_msgpack))
+  assert_equal(hash, MessagePack.unpack(MessagePack.pack(hash)))
 end
 
 assert("Class#to_msgpack with registered ext type") do
