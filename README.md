@@ -16,8 +16,15 @@ By default, MessagePack packs symbols as strings and does not convert them
 back when unpacking them. Symbols can be preserved by registering an extension
 type for them.
 
+Packing an object is also possible using `MessagePack#pack`
+```ruby
+MessagePack.pack(:an_object)
+````
+
 Extension Types
 ---------------
+
+To customize how objects are packed, define an extension type:
 
 ```ruby
 MessagePack.register_pack_type(0, Symbol) { |symbol| symbol.to_s }
