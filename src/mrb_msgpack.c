@@ -16,9 +16,6 @@ typedef struct {
     mrb_value buffer;
 } mrb_msgpack_data;
 
-static mrb_value ext_packers;
-static mrb_value ext_unpackers;
-
 #if (__GNUC__ >= 3) || (__INTEL_COMPILER >= 800) || defined(__clang__)
 #define likely(x) __builtin_expect(!!(x), 1)
 #define unlikely(x) __builtin_expect(!!(x), 0)
@@ -76,6 +73,8 @@ mrb_msgpack_pack_string_value(mrb_value self, msgpack_packer* pk)
 MRB_INLINE mrb_value
 mrb_msgpack_get_ext_config(mrb_state* mrb, mrb_value obj)
 {
+    struct RClass* msgpack_mod = mrb_module_get(mrb, "MessagePack");
+    mrb_value ext_packers = mrb_mod_cv_get(mrb, msgpack_mod, mrb_intern_lit(mrb, "_ext_packers"));
     mrb_value obj_class = mrb_obj_value(mrb_obj_class(mrb, obj));
     mrb_value ext_config = mrb_hash_get(mrb, ext_packers, obj_class);
 
@@ -392,6 +391,8 @@ mrb_unpack_msgpack_obj(mrb_state* mrb, msgpack_object obj)
             return mrb_str_new(mrb, obj.via.bin.ptr, obj.via.bin.size);
             break;
         case MSGPACK_OBJECT_EXT: {
+            struct RClass* msgpack_mod = mrb_module_get(mrb, "MessagePack");
+            mrb_value ext_unpackers = mrb_mod_cv_get(mrb, msgpack_mod, mrb_intern_lit(mrb, "_ext_unpackers"));
             mrb_value unpacker = mrb_hash_get(mrb, ext_unpackers, mrb_fixnum_value(obj.via.ext.type));
             mrb_value data = mrb_str_new(mrb, obj.via.ext.ptr, obj.via.ext.size);
 
@@ -518,6 +519,8 @@ mrb_msgpack_unpack(mrb_state* mrb, mrb_value self)
 static mrb_value
 mrb_msgpack_register_pack_type(mrb_state* mrb, mrb_value self)
 {
+    struct RClass* msgpack_mod;
+    mrb_value ext_packers;
     mrb_int type;
     mrb_value mrb_class;
     mrb_value block = mrb_nil_value();
@@ -533,6 +536,8 @@ mrb_msgpack_register_pack_type(mrb_state* mrb, mrb_value self)
         mrb_raise(mrb, E_MSGPACK_ERROR, "no block given");
     }
 
+    msgpack_mod = mrb_module_get(mrb, "MessagePack");
+    ext_packers = mrb_mod_cv_get(mrb, msgpack_mod, mrb_intern_lit(mrb, "_ext_packers"));
     ext_config = mrb_hash_new(mrb);
     mrb_hash_set(mrb, ext_config, mrb_symbol_value(mrb_intern_lit(mrb, "type")), mrb_fixnum_value(type));
     mrb_hash_set(mrb, ext_config, mrb_symbol_value(mrb_intern_lit(mrb, "packer")), block);
@@ -544,6 +549,8 @@ mrb_msgpack_register_pack_type(mrb_state* mrb, mrb_value self)
 static mrb_value
 mrb_msgpack_register_unpack_type(mrb_state* mrb, mrb_value self)
 {
+    struct RClass* msgpack_mod;
+    mrb_value ext_unpackers;
     mrb_int type;
     mrb_value block = mrb_nil_value();
 
@@ -557,6 +564,8 @@ mrb_msgpack_register_unpack_type(mrb_state* mrb, mrb_value self)
         mrb_raise(mrb, E_MSGPACK_ERROR, "no block");
     }
 
+    msgpack_mod = mrb_module_get(mrb, "MessagePack");
+    ext_unpackers = mrb_mod_cv_get(mrb, msgpack_mod, mrb_intern_lit(mrb, "_ext_unpackers"));
     mrb_hash_set(mrb, ext_unpackers, mrb_fixnum_value(type), block);
 
     return mrb_nil_value();
@@ -566,9 +575,6 @@ void
 mrb_mruby_simplemsgpack_gem_init(mrb_state* mrb)
 {
     struct RClass* msgpack_mod;
-
-    ext_packers = mrb_hash_new(mrb);
-    ext_unpackers = mrb_hash_new(mrb);
 
     mrb_define_method(mrb, mrb->object_class, "to_msgpack", mrb_msgpack_pack_object, MRB_ARGS_NONE());
     mrb_define_method(mrb, mrb->string_class, "to_msgpack", mrb_msgpack_pack_string, MRB_ARGS_NONE());
@@ -583,10 +589,8 @@ mrb_mruby_simplemsgpack_gem_init(mrb_state* mrb)
     msgpack_mod = mrb_define_module(mrb, "MessagePack");
     mrb_define_class_under(mrb, msgpack_mod, "Error", E_RUNTIME_ERROR);
 
-    // attach hashes with packers and unpackers to MessagePack module as
-    // instance variables to prevent garbage collection.
-    mrb_iv_set(mrb, mrb_obj_value(msgpack_mod), mrb_intern_lit(mrb, "ext_packers"), ext_packers);
-    mrb_iv_set(mrb, mrb_obj_value(msgpack_mod), mrb_intern_lit(mrb, "ext_unpackers"), ext_unpackers);
+    mrb_mod_cv_set(mrb, msgpack_mod, mrb_intern_lit(mrb, "_ext_packers"), mrb_hash_new(mrb));
+    mrb_mod_cv_set(mrb, msgpack_mod, mrb_intern_lit(mrb, "_ext_unpackers"), mrb_hash_new(mrb));
 
     mrb_define_module_function(mrb, msgpack_mod, "pack", mrb_msgpack_pack, (MRB_ARGS_REQ(1)));
     mrb_define_module_function(mrb, msgpack_mod, "unpack", mrb_msgpack_unpack, (MRB_ARGS_ARG(1, 0)|MRB_ARGS_BLOCK()));
