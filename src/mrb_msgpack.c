@@ -59,15 +59,6 @@ mrb_msgpack_pack_float_value(mrb_value self, msgpack_packer* pk)
 }
 
 MRB_INLINE void
-mrb_msgpack_pack_symbol_value(mrb_state* mrb, mrb_value self, msgpack_packer* pk)
-{
-    mrb_int len;
-    const char* name = mrb_sym2name_len(mrb, mrb_symbol(self), &len);
-    msgpack_pack_ext(pk, len, 1);
-    msgpack_pack_ext_body(pk, name, len);
-}
-
-MRB_INLINE void
 mrb_msgpack_pack_string_value(mrb_value self, msgpack_packer* pk)
 {
     if (mrb_str_is_utf8(self)) {
@@ -79,14 +70,61 @@ mrb_msgpack_pack_string_value(mrb_value self, msgpack_packer* pk)
     }
 }
 
-MRB_INLINE void
-mrb_msgpack_pack_class_value(mrb_state* mrb, mrb_value self, msgpack_packer* pk)
+MRB_INLINE mrb_value
+mrb_msgpack_get_ext_config(mrb_state* mrb, mrb_value obj)
 {
-    struct RClass* mrb_class = mrb_class_ptr(self);
-    const char* class_name = mrb_class_name(mrb, mrb_class);
-    size_t len = strlen(class_name);
-    msgpack_pack_ext(pk, len, 2);
-    msgpack_pack_ext_body(pk, class_name, len);
+    struct RClass* msgpack_mod = mrb_module_get(mrb, "MessagePack");
+    mrb_value ext_packers = mrb_mod_cv_get(mrb, msgpack_mod, mrb_intern_lit(mrb, "_ext_packers"));
+    mrb_value obj_class = mrb_obj_value(mrb_obj_class(mrb, obj));
+    mrb_value ext_config = mrb_hash_get(mrb, ext_packers, obj_class);
+
+    if (!mrb_nil_p(ext_config)) {
+        return ext_config;
+    }
+
+    mrb_value ext_type_classes = mrb_funcall(mrb, ext_packers, "keys", 0);
+    mrb_int classes_count = RARRAY_LEN(ext_type_classes);
+
+    for (mrb_int i = 0; i < classes_count; i += 1) {
+        mrb_value ext_type_class = mrb_ary_ref(mrb, ext_type_classes, i);
+
+        if (mrb_obj_is_kind_of(mrb, obj, mrb_class_ptr(ext_type_class))) {
+            ext_config = mrb_hash_get(mrb, ext_packers, ext_type_class);
+            mrb_hash_set(mrb, ext_packers, obj_class, ext_config);
+            return ext_config;
+        }
+    }
+
+    return mrb_nil_value();
+}
+
+MRB_INLINE int
+mrb_msgpack_pack_ext_value(mrb_state* mrb, mrb_value self, msgpack_packer* pk)
+{
+    mrb_value ext_config = mrb_msgpack_get_ext_config(mrb, self);
+
+    if (mrb_nil_p(ext_config)) {
+        return 0;
+    }
+
+    mrb_value type = mrb_hash_get(mrb, ext_config, mrb_symbol_value(mrb_intern_lit(mrb, "type")));
+    mrb_value packer = mrb_hash_get(mrb, ext_config, mrb_symbol_value(mrb_intern_lit(mrb, "packer")));
+    mrb_value packed = mrb_yield(mrb, packer, self);
+
+    const char* body;
+    size_t len;
+
+    if (!mrb_string_p(packed)) {
+        mrb_raise(mrb, E_MSGPACK_ERROR, "no string returned by ext type packer");
+    }
+
+    body = mrb_str_to_cstr(mrb, packed);
+    len = strlen(body);
+
+    msgpack_pack_ext(pk, len, mrb_fixnum(type));
+    msgpack_pack_ext_body(pk, body, len);
+
+    return 1;
 }
 
 MRB_INLINE void
@@ -112,16 +150,8 @@ mrb_msgpack_pack_value(mrb_state* mrb, mrb_value self, msgpack_packer* pk)
         case MRB_TT_FIXNUM:
             mrb_msgpack_pack_fixnum_value(self, pk);
             break;
-        case MRB_TT_SYMBOL:
-            mrb_msgpack_pack_symbol_value(mrb, self, pk);
-            break;
         case MRB_TT_FLOAT:
             mrb_msgpack_pack_float_value(self, pk);
-            break;
-        case MRB_TT_CLASS:
-        case MRB_TT_MODULE:
-        case MRB_TT_SCLASS:
-            mrb_msgpack_pack_class_value(mrb, self, pk);
             break;
         case MRB_TT_ARRAY:
             mrb_msgpack_pack_array_value(mrb, self, pk);
@@ -133,26 +163,23 @@ mrb_msgpack_pack_value(mrb_state* mrb, mrb_value self, msgpack_packer* pk)
             mrb_msgpack_pack_string_value(self, pk);
             break;
         default: {
-            mrb_value try_convert;
-            try_convert = mrb_check_convert_type(mrb, self, MRB_TT_HASH, "Hash", "to_hash");
-            if (mrb_hash_p(try_convert)) {
-                mrb_msgpack_pack_hash_value(mrb, try_convert, pk);
-            } else {
-                try_convert = mrb_check_convert_type(mrb, self, MRB_TT_ARRAY, "Array", "to_ary");
-                if (mrb_array_p(try_convert)) {
-                    mrb_msgpack_pack_array_value(mrb, try_convert, pk);
+            if (!mrb_msgpack_pack_ext_value(mrb, self, pk)) {
+                mrb_value try_convert;
+                try_convert = mrb_check_convert_type(mrb, self, MRB_TT_HASH, "Hash", "to_hash");
+                if (mrb_hash_p(try_convert)) {
+                    mrb_msgpack_pack_hash_value(mrb, try_convert, pk);
                 } else {
-                    try_convert = mrb_check_convert_type(mrb, self, MRB_TT_FIXNUM, "Fixnum", "to_int");
-                    if (mrb_fixnum_p(try_convert)) {
-                        mrb_msgpack_pack_fixnum_value(try_convert, pk);
+                    try_convert = mrb_check_convert_type(mrb, self, MRB_TT_ARRAY, "Array", "to_ary");
+                    if (mrb_array_p(try_convert)) {
+                        mrb_msgpack_pack_array_value(mrb, try_convert, pk);
                     } else {
-                        try_convert = mrb_check_convert_type(mrb, self, MRB_TT_STRING, "String", "to_str");
-                        if (mrb_string_p(try_convert)) {
-                            mrb_msgpack_pack_string_value(try_convert, pk);
+                        try_convert = mrb_check_convert_type(mrb, self, MRB_TT_FIXNUM, "Fixnum", "to_int");
+                        if (mrb_fixnum_p(try_convert)) {
+                            mrb_msgpack_pack_fixnum_value(try_convert, pk);
                         } else {
-                            try_convert = mrb_check_convert_type(mrb, self, MRB_TT_SYMBOL, "Symbol", "to_sym");
-                            if (mrb_symbol_p(try_convert)) {
-                                mrb_msgpack_pack_symbol_value(mrb, try_convert, pk);
+                            try_convert = mrb_check_convert_type(mrb, self, MRB_TT_STRING, "String", "to_str");
+                            if (mrb_string_p(try_convert)) {
+                                mrb_msgpack_pack_string_value(try_convert, pk);
                             } else {
                                 try_convert = mrb_convert_type(mrb, self, MRB_TT_STRING, "String", "to_s");
                                 mrb_msgpack_pack_string_value(try_convert, pk);
@@ -314,42 +341,14 @@ mrb_msgpack_pack_nil(mrb_state* mrb, mrb_value self)
     return data.buffer;
 }
 
-static mrb_value
-mrb_msgpack_pack_symbol(mrb_state* mrb, mrb_value self)
-{
-    msgpack_packer pk;
-    mrb_msgpack_data data;
-    data.mrb = mrb;
-    data.buffer = mrb_str_new(mrb, NULL, 0);
-    msgpack_packer_init(&pk, &data, mrb_msgpack_data_write);
-
-    mrb_msgpack_pack_symbol_value(mrb, self, &pk);
-
-    return data.buffer;
-}
-
-static mrb_value
-mrb_msgpack_pack_class(mrb_state* mrb, mrb_value self)
-{
-    msgpack_packer pk;
-    mrb_msgpack_data data;
-    data.mrb = mrb;
-    data.buffer = mrb_str_new(mrb, NULL, 0);
-    msgpack_packer_init(&pk, &data, mrb_msgpack_data_write);
-
-    mrb_msgpack_pack_class_value(mrb, self, &pk);
-
-    return data.buffer;
-}
+MRB_INLINE mrb_value
+mrb_unpack_msgpack_obj_array(mrb_state* mrb, msgpack_object obj);
 
 MRB_INLINE mrb_value
-mrb_unpack_msgpack_obj_array(mrb_state* mrb, msgpack_object obj, mrb_bool force_symbols);
+mrb_unpack_msgpack_obj_map(mrb_state* mrb, msgpack_object obj);
 
 MRB_INLINE mrb_value
-mrb_unpack_msgpack_obj_map(mrb_state* mrb, msgpack_object obj, mrb_bool force_symbols);
-
-MRB_INLINE mrb_value
-mrb_unpack_msgpack_obj(mrb_state* mrb, msgpack_object obj, mrb_bool force_symbols)
+mrb_unpack_msgpack_obj(mrb_state* mrb, msgpack_object obj)
 {
     switch (obj.type) {
         case MSGPACK_OBJECT_NIL:
@@ -383,32 +382,21 @@ mrb_unpack_msgpack_obj(mrb_state* mrb, msgpack_object obj, mrb_bool force_symbol
             return mrb_str_new(mrb, obj.via.str.ptr, obj.via.str.size);
             break;
         case MSGPACK_OBJECT_ARRAY:
-            return mrb_unpack_msgpack_obj_array(mrb, obj, force_symbols);
+            return mrb_unpack_msgpack_obj_array(mrb, obj);
             break;
         case MSGPACK_OBJECT_MAP:
-            return mrb_unpack_msgpack_obj_map(mrb, obj, force_symbols);
+            return mrb_unpack_msgpack_obj_map(mrb, obj);
             break;
         case MSGPACK_OBJECT_BIN:
             return mrb_str_new(mrb, obj.via.bin.ptr, obj.via.bin.size);
             break;
         case MSGPACK_OBJECT_EXT: {
-            switch (obj.via.ext.type) {
-                case 1: {
-                    if (force_symbols) {
-                        return mrb_symbol_value(mrb_intern(mrb, obj.via.ext.ptr, obj.via.ext.size));
-                    } else {
-                        return mrb_check_intern(mrb, obj.via.ext.ptr, obj.via.ext.size);
-                    }
-                } break;
-                case 2: {
-                    mrb_value classname_obj = mrb_str_new_static(mrb, obj.via.ext.ptr, obj.via.ext.size);
-                    return mrb_funcall(mrb, classname_obj, "constantize", 0);
-                } break;
-                default: {
-                    mrb_warn(mrb, "Cannot unpack ext type %S, returning a raw string", mrb_fixnum_value(obj.via.ext.type));
-                    return mrb_str_new(mrb, obj.via.ext.ptr, obj.via.ext.size);
-                }
-            }
+            struct RClass* msgpack_mod = mrb_module_get(mrb, "MessagePack");
+            mrb_value ext_unpackers = mrb_mod_cv_get(mrb, msgpack_mod, mrb_intern_lit(mrb, "_ext_unpackers"));
+            mrb_value unpacker = mrb_hash_get(mrb, ext_unpackers, mrb_fixnum_value(obj.via.ext.type));
+            mrb_value data = mrb_str_new(mrb, obj.via.ext.ptr, obj.via.ext.size);
+
+            return mrb_yield(mrb, unpacker, data);
         } break;
         default:
             mrb_raisef(mrb, E_MSGPACK_ERROR, "Cannot unpack type %S", mrb_fixnum_value(obj.type));
@@ -416,13 +404,13 @@ mrb_unpack_msgpack_obj(mrb_state* mrb, msgpack_object obj, mrb_bool force_symbol
 }
 
 MRB_INLINE mrb_value
-mrb_unpack_msgpack_obj_array(mrb_state* mrb, msgpack_object obj, mrb_bool force_symbols)
+mrb_unpack_msgpack_obj_array(mrb_state* mrb, msgpack_object obj)
 {
     if (obj.via.array.size != 0) {
         mrb_value unpacked_array = mrb_ary_new_capa(mrb, obj.via.array.size);
         int ai = mrb_gc_arena_save(mrb);
         for (size_t array_pos = 0; array_pos < obj.via.array.size; array_pos++) {
-            mrb_value unpacked_obj = mrb_unpack_msgpack_obj(mrb, obj.via.array.ptr[array_pos], force_symbols);
+            mrb_value unpacked_obj = mrb_unpack_msgpack_obj(mrb, obj.via.array.ptr[array_pos]);
             mrb_ary_push(mrb, unpacked_array, unpacked_obj);
             mrb_gc_arena_restore(mrb, ai);
         }
@@ -434,14 +422,14 @@ mrb_unpack_msgpack_obj_array(mrb_state* mrb, msgpack_object obj, mrb_bool force_
 }
 
 MRB_INLINE mrb_value
-mrb_unpack_msgpack_obj_map(mrb_state* mrb, msgpack_object obj, mrb_bool force_symbols)
+mrb_unpack_msgpack_obj_map(mrb_state* mrb, msgpack_object obj)
 {
     if (obj.via.map.size != 0) {
         mrb_value unpacked_hash = mrb_hash_new_capa(mrb, obj.via.map.size);
         int ai = mrb_gc_arena_save(mrb);
         for (size_t map_pos = 0; map_pos < obj.via.map.size; map_pos++) {
-            mrb_value unpacked_key = mrb_unpack_msgpack_obj(mrb, obj.via.map.ptr[map_pos].key, force_symbols);
-            mrb_value unpacked_value = mrb_unpack_msgpack_obj(mrb, obj.via.map.ptr[map_pos].val, force_symbols);
+            mrb_value unpacked_key = mrb_unpack_msgpack_obj(mrb, obj.via.map.ptr[map_pos].key);
+            mrb_value unpacked_value = mrb_unpack_msgpack_obj(mrb, obj.via.map.ptr[map_pos].val);
             mrb_hash_set(mrb, unpacked_hash, unpacked_key, unpacked_value);
             mrb_gc_arena_restore(mrb, ai);
         }
@@ -453,12 +441,29 @@ mrb_unpack_msgpack_obj_map(mrb_state* mrb, msgpack_object obj, mrb_bool force_sy
 }
 
 static mrb_value
+mrb_msgpack_pack(mrb_state* mrb, mrb_value self)
+{
+    mrb_value object;
+
+    mrb_get_args(mrb, "o", &object);
+
+    msgpack_packer pk;
+    mrb_msgpack_data data;
+    data.mrb = mrb;
+    data.buffer = mrb_str_new(mrb, NULL, 0);
+    msgpack_packer_init(&pk, &data, mrb_msgpack_data_write);
+
+    mrb_msgpack_pack_value(mrb, object, &pk);
+
+    return data.buffer;
+}
+
+static mrb_value
 mrb_msgpack_unpack(mrb_state* mrb, mrb_value self)
 {
     mrb_value data, block = mrb_nil_value();
-    mrb_bool force_symbols = FALSE;
 
-    mrb_get_args(mrb, "o|b&", &data, &force_symbols, &block);
+    mrb_get_args(mrb, "o&", &data, &block);
 
     data = mrb_str_to_str(mrb, data);
 
@@ -478,12 +483,12 @@ mrb_msgpack_unpack(mrb_state* mrb, mrb_value self)
         mrb->jmp = &c_jmp;
         if (mrb_nil_p(block)) {
             if (ret == MSGPACK_UNPACK_SUCCESS) {
-                unpack_return = mrb_unpack_msgpack_obj(mrb, result.data, force_symbols);
+                unpack_return = mrb_unpack_msgpack_obj(mrb, result.data);
             }
         } else {
             int ai = mrb_gc_arena_save(mrb);
             while (ret == MSGPACK_UNPACK_SUCCESS) {
-                mrb_value unpacked_obj = mrb_unpack_msgpack_obj(mrb, result.data, force_symbols);
+                mrb_value unpacked_obj = mrb_unpack_msgpack_obj(mrb, result.data);
                 mrb_yield(mrb, block, unpacked_obj);
                 mrb_gc_arena_restore(mrb, ai);
                 ret = msgpack_unpack_next(&result, RSTRING_PTR(data), RSTRING_LEN(data), &off);
@@ -505,10 +510,65 @@ mrb_msgpack_unpack(mrb_state* mrb, mrb_value self)
         mrb_sys_fail(mrb, "msgpack_unpack_next");
     }
     if (ret == MSGPACK_UNPACK_PARSE_ERROR) {
-        mrb_raise(mrb, E_MSGPACK_ERROR, "Invalid data recieved");
+        mrb_raise(mrb, E_MSGPACK_ERROR, "Invalid data received");
     }
 
     return unpack_return;
+}
+
+static mrb_value
+mrb_msgpack_register_pack_type(mrb_state* mrb, mrb_value self)
+{
+    struct RClass* msgpack_mod;
+    mrb_value ext_packers;
+    mrb_int type;
+    mrb_value mrb_class;
+    mrb_value block = mrb_nil_value();
+    mrb_value ext_config;
+
+    mrb_get_args(mrb, "iC&", &type, &mrb_class, &block);
+
+    if (type < 0 || type > 127) {
+        mrb_raise(mrb, E_MSGPACK_ERROR, "ext type out of range");
+    }
+
+    if (mrb_nil_p(block)) {
+        mrb_raise(mrb, E_MSGPACK_ERROR, "no block given");
+    }
+
+    msgpack_mod = mrb_module_get(mrb, "MessagePack");
+    ext_packers = mrb_mod_cv_get(mrb, msgpack_mod, mrb_intern_lit(mrb, "_ext_packers"));
+    ext_config = mrb_hash_new(mrb);
+    mrb_hash_set(mrb, ext_config, mrb_symbol_value(mrb_intern_lit(mrb, "type")), mrb_fixnum_value(type));
+    mrb_hash_set(mrb, ext_config, mrb_symbol_value(mrb_intern_lit(mrb, "packer")), block);
+    mrb_hash_set(mrb, ext_packers, mrb_class, ext_config);
+
+    return mrb_nil_value();
+}
+
+static mrb_value
+mrb_msgpack_register_unpack_type(mrb_state* mrb, mrb_value self)
+{
+    struct RClass* msgpack_mod;
+    mrb_value ext_unpackers;
+    mrb_int type;
+    mrb_value block = mrb_nil_value();
+
+    mrb_get_args(mrb, "i&", &type, &block);
+
+    if (type < 0 || type > 127) {
+        mrb_raise(mrb, E_MSGPACK_ERROR, "ext type out of range");
+    }
+
+    if (mrb_nil_p(block)) {
+        mrb_raise(mrb, E_MSGPACK_ERROR, "no block");
+    }
+
+    msgpack_mod = mrb_module_get(mrb, "MessagePack");
+    ext_unpackers = mrb_mod_cv_get(mrb, msgpack_mod, mrb_intern_lit(mrb, "_ext_unpackers"));
+    mrb_hash_set(mrb, ext_unpackers, mrb_fixnum_value(type), block);
+
+    return mrb_nil_value();
 }
 
 void
@@ -525,13 +585,17 @@ mrb_mruby_simplemsgpack_gem_init(mrb_state* mrb)
     mrb_define_method(mrb, mrb->true_class, "to_msgpack", mrb_msgpack_pack_true, MRB_ARGS_NONE());
     mrb_define_method(mrb, mrb->false_class, "to_msgpack", mrb_msgpack_pack_false, MRB_ARGS_NONE());
     mrb_define_method(mrb, mrb->nil_class, "to_msgpack", mrb_msgpack_pack_nil, MRB_ARGS_NONE());
-    mrb_define_method(mrb, mrb->symbol_class, "to_msgpack", mrb_msgpack_pack_symbol, MRB_ARGS_NONE());
-    mrb_define_method(mrb, mrb->class_class, "to_msgpack", mrb_msgpack_pack_class, MRB_ARGS_NONE());
-    mrb_define_method(mrb, mrb->module_class, "to_msgpack", mrb_msgpack_pack_class, MRB_ARGS_NONE());
 
     msgpack_mod = mrb_define_module(mrb, "MessagePack");
     mrb_define_class_under(mrb, msgpack_mod, "Error", E_RUNTIME_ERROR);
-    mrb_define_module_function(mrb, msgpack_mod, "unpack", mrb_msgpack_unpack, (MRB_ARGS_ARG(1, 1)|MRB_ARGS_BLOCK()));
+
+    mrb_mod_cv_set(mrb, msgpack_mod, mrb_intern_lit(mrb, "_ext_packers"), mrb_hash_new(mrb));
+    mrb_mod_cv_set(mrb, msgpack_mod, mrb_intern_lit(mrb, "_ext_unpackers"), mrb_hash_new(mrb));
+
+    mrb_define_module_function(mrb, msgpack_mod, "pack", mrb_msgpack_pack, (MRB_ARGS_REQ(1)));
+    mrb_define_module_function(mrb, msgpack_mod, "unpack", mrb_msgpack_unpack, (MRB_ARGS_ARG(1, 0)|MRB_ARGS_BLOCK()));
+    mrb_define_module_function(mrb, msgpack_mod, "register_pack_type", mrb_msgpack_register_pack_type, (MRB_ARGS_REQ(2)|MRB_ARGS_BLOCK()));
+    mrb_define_module_function(mrb, msgpack_mod, "register_unpack_type", mrb_msgpack_register_unpack_type, (MRB_ARGS_REQ(1)|MRB_ARGS_BLOCK()));
 }
 
 void mrb_mruby_simplemsgpack_gem_final(mrb_state* mrb) { }
