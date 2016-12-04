@@ -78,7 +78,7 @@
 
 #endif
 
-#ifdef MSGPACK_ENDIAN_LITTLE_BYTE
+#if MSGPACK_ENDIAN_LITTLE_BYTE
 
 #   ifdef _WIN32
 #       if defined(ntohs)
@@ -184,6 +184,10 @@
 #    define false FALSE
 #  endif
 #  define inline __inline
+#endif
+
+#ifdef __APPLE__
+#  include <TargetConditionals.h>
 #endif
 
 #endif /* msgpack/sysdep.h */
