@@ -111,18 +111,12 @@ mrb_msgpack_pack_ext_value(mrb_state* mrb, mrb_value self, msgpack_packer* pk)
     mrb_value packer = mrb_hash_get(mrb, ext_config, mrb_symbol_value(mrb_intern_lit(mrb, "packer")));
     mrb_value packed = mrb_yield(mrb, packer, self);
 
-    const char* body;
-    size_t len;
-
     if (!mrb_string_p(packed)) {
         mrb_raise(mrb, E_MSGPACK_ERROR, "no string returned by ext type packer");
     }
 
-    body = mrb_str_to_cstr(mrb, packed);
-    len = strlen(body);
-
-    msgpack_pack_ext(pk, len, mrb_fixnum(type));
-    msgpack_pack_ext_body(pk, body, len);
+    msgpack_pack_ext(pk, RSTRING_LEN(packed), mrb_fixnum(type));
+    msgpack_pack_ext_body(pk, RSTRING_PTR(packed), RSTRING_LEN(packed));
 
     return 1;
 }
@@ -394,7 +388,7 @@ mrb_unpack_msgpack_obj(mrb_state* mrb, msgpack_object obj)
             struct RClass* msgpack_mod = mrb_module_get(mrb, "MessagePack");
             mrb_value ext_unpackers = mrb_mod_cv_get(mrb, msgpack_mod, mrb_intern_lit(mrb, "_ext_unpackers"));
             mrb_value unpacker = mrb_hash_get(mrb, ext_unpackers, mrb_fixnum_value(obj.via.ext.type));
-            mrb_value data = mrb_str_new(mrb, obj.via.ext.ptr, obj.via.ext.size);
+            mrb_value data = mrb_str_new_static(mrb, obj.via.ext.ptr, obj.via.ext.size);
 
             return mrb_yield(mrb, unpacker, data);
         } break;
@@ -538,7 +532,7 @@ mrb_msgpack_register_pack_type(mrb_state* mrb, mrb_value self)
 
     msgpack_mod = mrb_module_get(mrb, "MessagePack");
     ext_packers = mrb_mod_cv_get(mrb, msgpack_mod, mrb_intern_lit(mrb, "_ext_packers"));
-    ext_config = mrb_hash_new(mrb);
+    ext_config = mrb_hash_new_capa(mrb, 2);
     mrb_hash_set(mrb, ext_config, mrb_symbol_value(mrb_intern_lit(mrb, "type")), mrb_fixnum_value(type));
     mrb_hash_set(mrb, ext_config, mrb_symbol_value(mrb_intern_lit(mrb, "packer")), block);
     mrb_hash_set(mrb, ext_packers, mrb_class, ext_config);
