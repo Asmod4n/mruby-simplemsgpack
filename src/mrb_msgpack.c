@@ -487,6 +487,7 @@ mrb_msgpack_unpack(mrb_state* mrb, mrb_value self)
                 mrb_gc_arena_restore(mrb, ai);
                 ret = msgpack_unpack_next(&result, RSTRING_PTR(data), RSTRING_LEN(data), &off);
             }
+            unpack_return = mrb_fixnum_value(off);
         }
         mrb->jmp = prev_jmp;
     }
