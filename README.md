@@ -6,18 +6,48 @@ mruby-simplemsgpack
 Example
 -------
 
-```ruby
-packed_hash = {foo: "bar", baz: [1, {ret: "val"}]}.to_msgpack + "bye".to_msgpack
+Objects can be packed with `Object#to_msgpack` or `MessagePack.pack`:
 
-MessagePack.unpack(packed_hash) do |result|
-  puts result
-end
+```ruby
+packed_hash = { a: 'hash', with: [1, 'embedded', 'array'] }.to_msgpack
+packed_string = MessagePack.pack('bye')
+
+packed_hash   # => "\x82\xA1a\xA4hash\xA4with\x93\x01\xA8embedded\xA5array"
+packed_string # => "\xA3bye"
 ```
 
-Packing an object is also possible using `MessagePack#pack`
+They are unpacked with `MessagePack.unpack`:
+
 ```ruby
-MessagePack.pack(:an_object)
-````
+MessagePack.unpack(packed_hash)   # => { a: 'hash', with: [1, 'embedded', 'array'] }
+MessagePack.unpack(packed_string) # => 'bye'
+```
+
+A string with multiple packed values can be unpacked by handing a block to
+`MessagePack.unpack`:
+
+```ruby
+packed = packed_string + packed_hash
+unpacked = []
+MessagePack.unpack(packed) do |result|
+  unpacked << result
+end
+unpacked # => ['bye', { a: 'hash', with: [1, 'embedded', 'array'] }]
+```
+
+When using `MessagePack.unpack` with a block it returns the number of bytes it
+was able to unpack. This is helpful if the given data contains an incomplete
+last object and we want to continue unpacking after we have more data.
+
+```ruby
+packed = packed_string + packed_hash.slice(0, packed_hash.length/2)
+unpacked = []
+unpacked_length = MessagePack.unpack(packed) do |result|
+  unpacked << result
+end
+unpacked_length # => 4 (length of packed_string)
+unpacked # => ['bye']
+```
 
 Extension Types
 ---------------
@@ -36,7 +66,7 @@ MessagePack.register_unpack_type(sym_ext_type) { |data| data.to_sym }
 MessagePack.unpack(:symbol.to_msgpack) # => :symbol
 ```
 
-Other object like classes can also be preserved:
+Other objects like classes can also be preserved:
 
 ```ruby
 cls_ext_type = 1
