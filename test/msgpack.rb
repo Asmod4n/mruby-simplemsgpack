@@ -54,6 +54,41 @@ assert("Module#to_msgpack") do
   assert_equal('MessagePack::Error', MessagePack.unpack(MessagePack::Error.to_msgpack))
 end
 
+assert("MessagePack.unpack with block") do
+  value1 = 'the first string'
+  value2 = 'and this is another one'
+  value3 = 'all good things come in threes'
+
+  packed1 = value1.to_msgpack
+  packed2 = value2.to_msgpack
+  packed3 = value3.to_msgpack
+
+  packed = packed1 + packed2 + packed3
+  chunk1 = packed[0..packed1.length+5]
+  chunk2 = packed[packed1.length+5..-1]
+
+  unpacked = []
+
+  # unpack everything possible from chunk1
+  unpacked_length = MessagePack.unpack(chunk1) { |value| unpacked << value }
+
+  # only value1 can be unpacked
+  assert_equal(unpacked_length, packed1.length)
+  assert_equal(unpacked, [value1])
+
+  # remove unpacked bytes from chunk1
+  slice_start = unpacked_length
+  slice_length = chunk1.length - (unpacked_length+1)
+  chunk1 = chunk1.slice(slice_start, slice_length)
+
+  # continue unpacking with rest of chunk1 and chunk2
+  unpacked_length = MessagePack.unpack(chunk1 + chunk2) { |value| unpacked << value }
+
+  # now, everything is unpacked
+  assert_equal(unpacked_length, chunk1.length + chunk2.length)
+  assert_equal(unpacked, [value1, value2, value3])
+end
+
 assert("MessagePack.register_pack_type") do
   assert_raise(MessagePack::Error, "ext type out of range") do
     MessagePack.register_pack_type(-1, Symbol)
