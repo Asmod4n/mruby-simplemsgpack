@@ -35,8 +35,9 @@ end
 unpacked # => ['bye', { a: 'hash', with: [1, 'embedded', 'array'] }]
 ```
 
-When using `MessagePack.unpack` with a block it returns the number of bytes it
-was able to unpack. This is helpful if the given data contains an incomplete
+When using `MessagePack.unpack` with a block and passing it a incomplete packed Message
+it returns the number of bytes it was able to unpack, if it was able to unpack the howl Message it returns self.
+This is helpful if the given data contains an incomplete
 last object and we want to continue unpacking after we have more data.
 
 ```ruby

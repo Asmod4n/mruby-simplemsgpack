@@ -198,7 +198,7 @@ mrb_msgpack_pack_array_value(mrb_state* mrb, mrb_value self, msgpack_packer* pk)
 MRB_INLINE void
 mrb_msgpack_pack_hash_value(mrb_state* mrb, mrb_value self, msgpack_packer* pk)
 {
-    int ai = mrb_gc_arena_save(mrb);
+    int arena_index = mrb_gc_arena_save(mrb);
     mrb_value keys = mrb_hash_keys(mrb, self);
     msgpack_pack_map(pk, RARRAY_LEN(keys));
     for (mrb_int hash_pos = 0; hash_pos != RARRAY_LEN(keys); hash_pos++) {
@@ -206,7 +206,7 @@ mrb_msgpack_pack_hash_value(mrb_state* mrb, mrb_value self, msgpack_packer* pk)
         mrb_msgpack_pack_value(mrb, key, pk);
         mrb_msgpack_pack_value(mrb, mrb_hash_get(mrb, self, key), pk);
     }
-    mrb_gc_arena_restore(mrb, ai);
+    mrb_gc_arena_restore(mrb, arena_index);
 }
 
 static mrb_value
@@ -402,11 +402,11 @@ mrb_unpack_msgpack_obj_array(mrb_state* mrb, msgpack_object obj)
 {
     if (obj.via.array.size != 0) {
         mrb_value unpacked_array = mrb_ary_new_capa(mrb, obj.via.array.size);
-        int ai = mrb_gc_arena_save(mrb);
+        int arena_index = mrb_gc_arena_save(mrb);
         for (size_t array_pos = 0; array_pos < obj.via.array.size; array_pos++) {
             mrb_value unpacked_obj = mrb_unpack_msgpack_obj(mrb, obj.via.array.ptr[array_pos]);
             mrb_ary_push(mrb, unpacked_array, unpacked_obj);
-            mrb_gc_arena_restore(mrb, ai);
+            mrb_gc_arena_restore(mrb, arena_index);
         }
 
         return unpacked_array;
@@ -420,12 +420,12 @@ mrb_unpack_msgpack_obj_map(mrb_state* mrb, msgpack_object obj)
 {
     if (obj.via.map.size != 0) {
         mrb_value unpacked_hash = mrb_hash_new_capa(mrb, obj.via.map.size);
-        int ai = mrb_gc_arena_save(mrb);
+        int arena_index = mrb_gc_arena_save(mrb);
         for (size_t map_pos = 0; map_pos < obj.via.map.size; map_pos++) {
             mrb_value unpacked_key = mrb_unpack_msgpack_obj(mrb, obj.via.map.ptr[map_pos].key);
             mrb_value unpacked_value = mrb_unpack_msgpack_obj(mrb, obj.via.map.ptr[map_pos].val);
             mrb_hash_set(mrb, unpacked_hash, unpacked_key, unpacked_value);
-            mrb_gc_arena_restore(mrb, ai);
+            mrb_gc_arena_restore(mrb, arena_index);
         }
 
         return unpacked_hash;
@@ -480,14 +480,13 @@ mrb_msgpack_unpack(mrb_state* mrb, mrb_value self)
                 unpack_return = mrb_unpack_msgpack_obj(mrb, result.data);
             }
         } else {
-            int ai = mrb_gc_arena_save(mrb);
+            int arena_index = mrb_gc_arena_save(mrb);
             while (ret == MSGPACK_UNPACK_SUCCESS) {
                 mrb_value unpacked_obj = mrb_unpack_msgpack_obj(mrb, result.data);
                 mrb_yield(mrb, block, unpacked_obj);
-                mrb_gc_arena_restore(mrb, ai);
+                mrb_gc_arena_restore(mrb, arena_index);
                 ret = msgpack_unpack_next(&result, RSTRING_PTR(data), RSTRING_LEN(data), &off);
             }
-            unpack_return = mrb_fixnum_value(off);
         }
         mrb->jmp = prev_jmp;
     }
@@ -501,14 +500,20 @@ mrb_msgpack_unpack(mrb_state* mrb, mrb_value self)
 
     msgpack_unpacked_destroy(&result);
 
-    if (unlikely(ret == MSGPACK_UNPACK_NOMEM_ERROR)) {
-        mrb_sys_fail(mrb, "msgpack_unpack_next");
-    }
-    if (ret == MSGPACK_UNPACK_PARSE_ERROR) {
-        mrb_raise(mrb, E_MSGPACK_ERROR, "Invalid data received");
+    switch (ret) {
+        case MSGPACK_UNPACK_SUCCESS:
+            return unpack_return;
+        case MSGPACK_UNPACK_EXTRA_BYTES: //not used
+            break;
+        case MSGPACK_UNPACK_CONTINUE:
+            return mrb_fixnum_value(off);
+        case MSGPACK_UNPACK_PARSE_ERROR:
+            mrb_raise(mrb, E_MSGPACK_ERROR, "Invalid data received");
+        case MSGPACK_UNPACK_NOMEM_ERROR:
+            mrb_sys_fail(mrb, "msgpack_unpack_next");
     }
 
-    return unpack_return;
+    return self;
 }
 
 static mrb_value
