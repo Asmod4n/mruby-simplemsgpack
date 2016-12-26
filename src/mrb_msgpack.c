@@ -388,6 +388,9 @@ mrb_unpack_msgpack_obj(mrb_state* mrb, msgpack_object obj)
             struct RClass* msgpack_mod = mrb_module_get(mrb, "MessagePack");
             mrb_value ext_unpackers = mrb_mod_cv_get(mrb, msgpack_mod, mrb_intern_lit(mrb, "_ext_unpackers"));
             mrb_value unpacker = mrb_hash_get(mrb, ext_unpackers, mrb_fixnum_value(obj.via.ext.type));
+            if (mrb_type(unpacker) != MRB_TT_PROC) {
+                mrb_raisef(mrb, E_MSGPACK_ERROR, "Cannot unpack ext type %S", mrb_fixnum_value(obj.via.ext.type));
+            }
             mrb_value data = mrb_str_new_static(mrb, obj.via.ext.ptr, obj.via.ext.size);
 
             return mrb_yield(mrb, unpacker, data);
