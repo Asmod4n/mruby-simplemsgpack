@@ -143,6 +143,13 @@ assert("Registered ext type for one of the core types is ignored") do
   assert_equal(['item'], MessagePack.unpack(['item'].to_msgpack))
 end
 
+assert("Unknown Ext Type raises a Exception when tried to unpack") do
+  assert_raise(MessagePack::Error) do
+    MessagePack.register_pack_type(50, Symbol) { |symbol| symbol.to_s }
+    MessagePack.unpack(:hallo.to_msgpack)
+  end
+end
+
 assert("Extension types are inherited") do
   class Test
     def initialize(id)
