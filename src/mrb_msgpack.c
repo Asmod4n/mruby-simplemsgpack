@@ -78,11 +78,11 @@ mrb_msgpack_get_ext_config(mrb_state* mrb, mrb_value obj)
     mrb_value obj_class = mrb_obj_value(mrb_obj_class(mrb, obj));
     mrb_value ext_config = mrb_hash_get(mrb, ext_packers, obj_class);
 
-    if (!mrb_nil_p(ext_config)) {
+    if (mrb_test(ext_config)) {
         return ext_config;
     }
 
-    mrb_value ext_type_classes = mrb_funcall(mrb, ext_packers, "keys", 0);
+    mrb_value ext_type_classes = mrb_hash_keys(mrb, ext_packers);
     mrb_int classes_count = RARRAY_LEN(ext_type_classes);
 
     for (mrb_int i = 0; i < classes_count; i += 1) {
@@ -98,13 +98,13 @@ mrb_msgpack_get_ext_config(mrb_state* mrb, mrb_value obj)
     return mrb_nil_value();
 }
 
-MRB_INLINE int
+MRB_INLINE mrb_bool
 mrb_msgpack_pack_ext_value(mrb_state* mrb, mrb_value self, msgpack_packer* pk)
 {
     mrb_value ext_config = mrb_msgpack_get_ext_config(mrb, self);
 
     if (mrb_nil_p(ext_config)) {
-        return 0;
+        return FALSE;
     }
 
     mrb_value type = mrb_hash_get(mrb, ext_config, mrb_symbol_value(mrb_intern_lit(mrb, "type")));
@@ -115,10 +115,10 @@ mrb_msgpack_pack_ext_value(mrb_state* mrb, mrb_value self, msgpack_packer* pk)
         mrb_raise(mrb, E_MSGPACK_ERROR, "no string returned by ext type packer");
     }
 
-    msgpack_pack_ext(pk, RSTRING_LEN(packed), mrb_fixnum(type));
+    msgpack_pack_ext(pk, RSTRING_LEN(packed), mrb_int(mrb, type));
     msgpack_pack_ext_body(pk, RSTRING_PTR(packed), RSTRING_LEN(packed));
 
-    return 1;
+    return TRUE;
 }
 
 MRB_INLINE void
@@ -391,7 +391,7 @@ mrb_unpack_msgpack_obj(mrb_state* mrb, msgpack_object obj)
             if (mrb_type(unpacker) != MRB_TT_PROC) {
                 mrb_raisef(mrb, E_MSGPACK_ERROR, "Cannot unpack ext type %S", mrb_fixnum_value(obj.via.ext.type));
             }
-            mrb_value data = mrb_str_new_static(mrb, obj.via.ext.ptr, obj.via.ext.size);
+            mrb_value data = mrb_str_new(mrb, obj.via.ext.ptr, obj.via.ext.size);
 
             return mrb_yield(mrb, unpacker, data);
         } break;
@@ -478,17 +478,17 @@ mrb_msgpack_unpack(mrb_state* mrb, mrb_value self)
     MRB_TRY(&c_jmp)
     {
         mrb->jmp = &c_jmp;
-        if (mrb_nil_p(block)) {
-            if (ret == MSGPACK_UNPACK_SUCCESS) {
-                unpack_return = mrb_unpack_msgpack_obj(mrb, result.data);
-            }
-        } else {
+        if (mrb_type(block) == MRB_TT_PROC) {
             int arena_index = mrb_gc_arena_save(mrb);
             while (ret == MSGPACK_UNPACK_SUCCESS) {
                 mrb_value unpacked_obj = mrb_unpack_msgpack_obj(mrb, result.data);
                 mrb_yield(mrb, block, unpacked_obj);
                 mrb_gc_arena_restore(mrb, arena_index);
                 ret = msgpack_unpack_next(&result, RSTRING_PTR(data), RSTRING_LEN(data), &off);
+            }
+        } else {
+            if (ret == MSGPACK_UNPACK_SUCCESS) {
+                unpack_return = mrb_unpack_msgpack_obj(mrb, result.data);
             }
         }
         mrb->jmp = prev_jmp;
