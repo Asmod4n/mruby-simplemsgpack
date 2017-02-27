@@ -175,3 +175,13 @@ assert("Extension types are inherited") do
   assert_equal(InheritsTest.new('inherited'), MessagePack.unpack(InheritsTest.new('inherited').to_msgpack))
 end
 
+assert("Extension types for modules") do
+  module Mod; end
+  MessagePack.register_pack_type(0, Mod) { |obj| 'packed' }
+
+  class Cls; include Mod end
+  assert_equal(Cls.new.to_msgpack, "\xc7\x06\x00packed")
+
+  assert_equal(Object.new.extend(Mod).to_msgpack, "\xc7\x06\x00packed")
+end
+
