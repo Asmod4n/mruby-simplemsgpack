@@ -85,7 +85,8 @@ mrb_msgpack_get_ext_config(mrb_state* mrb, mrb_value obj)
     mrb_value ext_type_classes = mrb_hash_keys(mrb, ext_packers);
     mrb_int classes_count = RARRAY_LEN(ext_type_classes);
 
-    for (mrb_int i = 0; i < classes_count; i += 1) {
+    mrb_int i;
+    for (i = 0; i < classes_count; i += 1) {
         mrb_value ext_type_class = mrb_ary_ref(mrb, ext_type_classes, i);
 
         if (mrb_obj_is_kind_of(mrb, obj, mrb_class_ptr(ext_type_class))) {
@@ -190,7 +191,8 @@ MRB_INLINE void
 mrb_msgpack_pack_array_value(mrb_state* mrb, mrb_value self, msgpack_packer* pk)
 {
     msgpack_pack_array(pk, RARRAY_LEN(self));
-    for (mrb_int ary_pos = 0; ary_pos != RARRAY_LEN(self); ary_pos++) {
+    mrb_int ary_pos;
+    for (ary_pos = 0; ary_pos != RARRAY_LEN(self); ary_pos++) {
         mrb_msgpack_pack_value(mrb, mrb_ary_ref(mrb, self, ary_pos), pk);
     }
 }
@@ -201,7 +203,8 @@ mrb_msgpack_pack_hash_value(mrb_state* mrb, mrb_value self, msgpack_packer* pk)
     int arena_index = mrb_gc_arena_save(mrb);
     mrb_value keys = mrb_hash_keys(mrb, self);
     msgpack_pack_map(pk, RARRAY_LEN(keys));
-    for (mrb_int hash_pos = 0; hash_pos != RARRAY_LEN(keys); hash_pos++) {
+    mrb_int hash_pos;
+    for (hash_pos = 0; hash_pos != RARRAY_LEN(keys); hash_pos++) {
         mrb_value key = mrb_ary_ref(mrb, keys, hash_pos);
         mrb_msgpack_pack_value(mrb, key, pk);
         mrb_msgpack_pack_value(mrb, mrb_hash_get(mrb, self, key), pk);
@@ -349,11 +352,7 @@ mrb_unpack_msgpack_obj(mrb_state* mrb, msgpack_object obj)
             return mrb_nil_value();
             break;
         case MSGPACK_OBJECT_BOOLEAN: {
-            if (obj.via.boolean) {
-                return mrb_true_value();
-            } else {
-                return mrb_false_value();
-            }
+            return mrb_bool_value(obj.via.boolean);
         } break;
         case MSGPACK_OBJECT_POSITIVE_INTEGER: {
             if (MRB_INT_MAX < obj.via.u64) {
@@ -406,7 +405,8 @@ mrb_unpack_msgpack_obj_array(mrb_state* mrb, msgpack_object obj)
     if (obj.via.array.size != 0) {
         mrb_value unpacked_array = mrb_ary_new_capa(mrb, obj.via.array.size);
         int arena_index = mrb_gc_arena_save(mrb);
-        for (size_t array_pos = 0; array_pos < obj.via.array.size; array_pos++) {
+        size_t array_pos;
+        for (array_pos = 0; array_pos < obj.via.array.size; array_pos++) {
             mrb_value unpacked_obj = mrb_unpack_msgpack_obj(mrb, obj.via.array.ptr[array_pos]);
             mrb_ary_push(mrb, unpacked_array, unpacked_obj);
             mrb_gc_arena_restore(mrb, arena_index);
@@ -424,7 +424,8 @@ mrb_unpack_msgpack_obj_map(mrb_state* mrb, msgpack_object obj)
     if (obj.via.map.size != 0) {
         mrb_value unpacked_hash = mrb_hash_new_capa(mrb, obj.via.map.size);
         int arena_index = mrb_gc_arena_save(mrb);
-        for (size_t map_pos = 0; map_pos < obj.via.map.size; map_pos++) {
+        size_t map_pos;
+        for (map_pos = 0; map_pos < obj.via.map.size; map_pos++) {
             mrb_value unpacked_key = mrb_unpack_msgpack_obj(mrb, obj.via.map.ptr[map_pos].key);
             mrb_value unpacked_value = mrb_unpack_msgpack_obj(mrb, obj.via.map.ptr[map_pos].val);
             mrb_hash_set(mrb, unpacked_hash, unpacked_key, unpacked_value);
@@ -479,11 +480,9 @@ mrb_msgpack_unpack(mrb_state* mrb, mrb_value self)
     {
         mrb->jmp = &c_jmp;
         if (mrb_type(block) == MRB_TT_PROC) {
-            int arena_index = mrb_gc_arena_save(mrb);
             while (ret == MSGPACK_UNPACK_SUCCESS) {
                 mrb_value unpacked_obj = mrb_unpack_msgpack_obj(mrb, result.data);
                 mrb_yield(mrb, block, unpacked_obj);
-                mrb_gc_arena_restore(mrb, arena_index);
                 ret = msgpack_unpack_next(&result, RSTRING_PTR(data), RSTRING_LEN(data), &off);
             }
         } else {
