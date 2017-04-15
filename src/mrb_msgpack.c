@@ -302,7 +302,7 @@ mrb_msgpack_pack_true(mrb_state* mrb, mrb_value self)
     msgpack_packer pk;
     mrb_msgpack_data data;
     data.mrb = mrb;
-    data.buffer = mrb_str_new(mrb, NULL, 1);
+    data.buffer = mrb_str_new(mrb, NULL, 0);
     msgpack_packer_init(&pk, &data, mrb_msgpack_data_write);
 
     msgpack_pack_true(&pk);
@@ -316,7 +316,7 @@ mrb_msgpack_pack_false(mrb_state* mrb, mrb_value self)
     msgpack_packer pk;
     mrb_msgpack_data data;
     data.mrb = mrb;
-    data.buffer = mrb_str_new(mrb, NULL, 1);
+    data.buffer = mrb_str_new(mrb, NULL, 0);
     msgpack_packer_init(&pk, &data, mrb_msgpack_data_write);
 
     msgpack_pack_false(&pk);
@@ -330,7 +330,7 @@ mrb_msgpack_pack_nil(mrb_state* mrb, mrb_value self)
     msgpack_packer pk;
     mrb_msgpack_data data;
     data.mrb = mrb;
-    data.buffer = mrb_str_new(mrb, NULL, 1);
+    data.buffer = mrb_str_new(mrb, NULL, 0);
     msgpack_packer_init(&pk, &data, mrb_msgpack_data_write);
 
     msgpack_pack_nil(&pk);
