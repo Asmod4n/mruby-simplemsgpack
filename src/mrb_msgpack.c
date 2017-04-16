@@ -84,6 +84,7 @@ mrb_msgpack_get_ext_config(mrb_state* mrb, mrb_value obj)
         return ext_config;
     }
 
+    int arena_index = mrb_gc_arena_save(mrb);
     mrb_value ext_type_classes = mrb_hash_keys(mrb, ext_packers);
     mrb_int classes_count = RARRAY_LEN(ext_type_classes);
 
@@ -94,9 +95,12 @@ mrb_msgpack_get_ext_config(mrb_state* mrb, mrb_value obj)
         if (mrb_obj_is_kind_of(mrb, obj, mrb_class_ptr(ext_type_class))) {
             ext_config = mrb_hash_get(mrb, ext_packers, ext_type_class);
             mrb_hash_set(mrb, ext_packers, obj_class, ext_config);
+            mrb_gc_arena_restore(mrb, arena_index);
             return ext_config;
         }
     }
+
+    mrb_gc_arena_restore(mrb, arena_index);
 
     return mrb_nil_value();
 }
@@ -350,47 +354,40 @@ mrb_unpack_msgpack_obj(mrb_state* mrb, msgpack_object obj)
     switch (obj.type) {
         case MSGPACK_OBJECT_NIL:
             return mrb_nil_value();
-            break;
-        case MSGPACK_OBJECT_BOOLEAN: {
+        case MSGPACK_OBJECT_BOOLEAN:
             return mrb_bool_value(obj.via.boolean);
-        } break;
         case MSGPACK_OBJECT_POSITIVE_INTEGER: {
             if (POSFIXABLE(obj.via.u64)) {
               return mrb_fixnum_value(obj.via.u64);
             }
             return mrb_float_value(mrb, obj.via.u64);
-        } break;
+        }
         case MSGPACK_OBJECT_NEGATIVE_INTEGER: {
             if (NEGFIXABLE(obj.via.i64)) {
               return mrb_fixnum_value(obj.via.i64);
             }
             return mrb_float_value(mrb, obj.via.i64);
-        } break;
+        }
         case MSGPACK_OBJECT_FLOAT:
             return mrb_float_value(mrb, obj.via.f64);
-            break;
         case MSGPACK_OBJECT_STR:
             return mrb_str_new(mrb, obj.via.str.ptr, obj.via.str.size);
-            break;
         case MSGPACK_OBJECT_ARRAY:
             return mrb_unpack_msgpack_obj_array(mrb, obj);
-            break;
         case MSGPACK_OBJECT_MAP:
             return mrb_unpack_msgpack_obj_map(mrb, obj);
-            break;
         case MSGPACK_OBJECT_BIN:
             return mrb_str_new(mrb, obj.via.bin.ptr, obj.via.bin.size);
-            break;
         case MSGPACK_OBJECT_EXT: {
             mrb_value unpacker = mrb_hash_get(mrb,
                 mrb_const_get(mrb, mrb_obj_value(mrb_module_get(mrb, "MessagePack")), mrb_intern_lit(mrb, "_ExtUnpackers")),
                 mrb_fixnum_value(obj.via.ext.type));
-            if (mrb_type(unpacker) != MRB_TT_PROC) {
+            if (unlikely(mrb_type(unpacker) != MRB_TT_PROC)) {
                 mrb_raisef(mrb, E_MSGPACK_ERROR, "Cannot unpack ext type %S", mrb_fixnum_value(obj.via.ext.type));
             }
 
             return mrb_yield(mrb, unpacker, mrb_str_new(mrb, obj.via.ext.ptr, obj.via.ext.size));
-        } break;
+        }
         default:
             mrb_raisef(mrb, E_MSGPACK_ERROR, "Cannot unpack type %S", mrb_fixnum_value(obj.type));
     }
@@ -552,7 +549,7 @@ mrb_msgpack_register_unpack_type(mrb_state* mrb, mrb_value self)
     }
 
     if (mrb_nil_p(block)) {
-        mrb_raise(mrb, E_MSGPACK_ERROR, "no block");
+        mrb_raise(mrb, E_MSGPACK_ERROR, "no block given");
     }
 
     mrb_hash_set(mrb, mrb_const_get(mrb, self, mrb_intern_lit(mrb, "_ExtUnpackers")), mrb_fixnum_value(type), block);
@@ -578,6 +575,8 @@ mrb_mruby_simplemsgpack_gem_init(mrb_state* mrb)
     msgpack_mod = mrb_define_module(mrb, "MessagePack");
     mrb_define_class_under(mrb, msgpack_mod, "Error", E_RUNTIME_ERROR);
 
+    const char *version = msgpack_version();
+    mrb_define_const(mrb, msgpack_mod, "Version", mrb_str_new_static(mrb, version, strlen(version)));
     mrb_define_const(mrb, msgpack_mod, "_ExtPackers", mrb_hash_new(mrb));
     mrb_define_const(mrb, msgpack_mod, "_ExtUnpackers", mrb_hash_new(mrb));
 
