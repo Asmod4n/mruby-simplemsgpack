@@ -368,8 +368,14 @@ mrb_unpack_msgpack_obj(mrb_state* mrb, msgpack_object obj)
             }
             return mrb_float_value(mrb, obj.via.i64);
         }
-        case MSGPACK_OBJECT_FLOAT:
+        case MSGPACK_OBJECT_FLOAT32:
             return mrb_float_value(mrb, obj.via.f64);
+        case MSGPACK_OBJECT_FLOAT64:
+#ifdef MRB_USE_FLOAT
+            mrb_raise(mrb, E_MSGPACK_ERROR, "mruby was compiled with MRB_USE_FLOAT, cannot unpack a double");
+#else
+            return mrb_float_value(mrb, obj.via.f64);
+#endif
         case MSGPACK_OBJECT_STR:
             return mrb_str_new(mrb, obj.via.str.ptr, obj.via.str.size);
         case MSGPACK_OBJECT_ARRAY:
