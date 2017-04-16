@@ -38,36 +38,48 @@ mrb_msgpack_data_write(void* data, const char* buf, size_t len)
 }
 
 MRB_INLINE void
-mrb_msgpack_pack_fixnum_value(mrb_value self, msgpack_packer* pk)
+mrb_msgpack_pack_fixnum_value(mrb_state *mrb, mrb_value self, msgpack_packer* pk)
 {
 #ifdef MRB_INT16
-    msgpack_pack_int16(pk, mrb_fixnum(self));
+    int rc = msgpack_pack_int16(pk, mrb_fixnum(self));
 #elif defined(MRB_INT64)
-    msgpack_pack_int64(pk, mrb_fixnum(self));
+    int rc = msgpack_pack_int64(pk, mrb_fixnum(self));
 #else
-    msgpack_pack_int32(pk, mrb_fixnum(self));
+    int rc = msgpack_pack_int32(pk, mrb_fixnum(self));
 #endif
+    if (unlikely(rc < 0)) {
+        mrb_raise(mrb, E_MSGPACK_ERROR, "cannot pack fixnum");
+    }
 }
 
 MRB_INLINE void
-mrb_msgpack_pack_float_value(mrb_value self, msgpack_packer* pk)
+mrb_msgpack_pack_float_value(mrb_state *mrb, mrb_value self, msgpack_packer* pk)
 {
 #ifdef MRB_USE_FLOAT
-    msgpack_pack_float(pk, mrb_float(self));
+    int rc = msgpack_pack_float(pk, mrb_float(self));
 #else
-    msgpack_pack_double(pk, mrb_float(self));
+    int rc = msgpack_pack_double(pk, mrb_float(self));
 #endif
+    if (unlikely(rc < 0)) {
+        mrb_raise(mrb, E_MSGPACK_ERROR, "cannot pack float");
+    }
 }
 
 MRB_INLINE void
-mrb_msgpack_pack_string_value(mrb_value self, msgpack_packer* pk)
+mrb_msgpack_pack_string_value(mrb_state *mrb, mrb_value self, msgpack_packer* pk)
 {
+    int rc = -1;
     if (mrb_str_is_utf8(self)) {
-        msgpack_pack_str(pk, RSTRING_LEN(self));
-        msgpack_pack_str_body(pk, RSTRING_PTR(self), RSTRING_LEN(self));
+        rc = msgpack_pack_str(pk, RSTRING_LEN(self));
+        if (likely(rc == 0))
+            rc = msgpack_pack_str_body(pk, RSTRING_PTR(self), RSTRING_LEN(self));
     } else {
-        msgpack_pack_bin(pk, RSTRING_LEN(self));
-        msgpack_pack_bin_body(pk, RSTRING_PTR(self), RSTRING_LEN(self));
+        rc = msgpack_pack_bin(pk, RSTRING_LEN(self));
+        if (likely(rc == 0))
+            rc = msgpack_pack_bin_body(pk, RSTRING_PTR(self), RSTRING_LEN(self));
+    }
+    if (unlikely(rc < 0)) {
+        mrb_raise(mrb, E_MSGPACK_ERROR, "cannot pack string");
     }
 }
 
@@ -135,22 +147,23 @@ mrb_msgpack_pack_hash_value(mrb_state* mrb, mrb_value self, msgpack_packer* pk);
 MRB_INLINE void
 mrb_msgpack_pack_value(mrb_state* mrb, mrb_value self, msgpack_packer* pk)
 {
+    int rc = 0;
     switch (mrb_type(self)) {
         case MRB_TT_FALSE: {
             if (!mrb_fixnum(self)) {
-                msgpack_pack_nil(pk);
+                rc = msgpack_pack_nil(pk);
             } else {
-                msgpack_pack_false(pk);
+                rc = msgpack_pack_false(pk);
             }
         } break;
         case MRB_TT_TRUE:
-            msgpack_pack_true(pk);
+            rc = msgpack_pack_true(pk);
             break;
         case MRB_TT_FIXNUM:
-            mrb_msgpack_pack_fixnum_value(self, pk);
+            mrb_msgpack_pack_fixnum_value(mrb, self, pk);
             break;
         case MRB_TT_FLOAT:
-            mrb_msgpack_pack_float_value(self, pk);
+            mrb_msgpack_pack_float_value(mrb, self, pk);
             break;
         case MRB_TT_ARRAY:
             mrb_msgpack_pack_array_value(mrb, self, pk);
@@ -159,7 +172,7 @@ mrb_msgpack_pack_value(mrb_state* mrb, mrb_value self, msgpack_packer* pk)
             mrb_msgpack_pack_hash_value(mrb, self, pk);
             break;
         case MRB_TT_STRING:
-            mrb_msgpack_pack_string_value(self, pk);
+            mrb_msgpack_pack_string_value(mrb, self, pk);
             break;
         default: {
             if (!mrb_msgpack_pack_ext_value(mrb, self, pk)) {
@@ -174,14 +187,14 @@ mrb_msgpack_pack_value(mrb_state* mrb, mrb_value self, msgpack_packer* pk)
                     } else {
                         try_convert = mrb_check_convert_type(mrb, self, MRB_TT_FIXNUM, "Fixnum", "to_int");
                         if (mrb_fixnum_p(try_convert)) {
-                            mrb_msgpack_pack_fixnum_value(try_convert, pk);
+                            mrb_msgpack_pack_fixnum_value(mrb, try_convert, pk);
                         } else {
                             try_convert = mrb_check_convert_type(mrb, self, MRB_TT_STRING, "String", "to_str");
                             if (mrb_string_p(try_convert)) {
-                                mrb_msgpack_pack_string_value(try_convert, pk);
+                                mrb_msgpack_pack_string_value(mrb, try_convert, pk);
                             } else {
                                 try_convert = mrb_convert_type(mrb, self, MRB_TT_STRING, "String", "to_s");
-                                mrb_msgpack_pack_string_value(try_convert, pk);
+                                mrb_msgpack_pack_string_value(mrb, try_convert, pk);
                             }
                         }
                     }
@@ -189,12 +202,18 @@ mrb_msgpack_pack_value(mrb_state* mrb, mrb_value self, msgpack_packer* pk)
             }
         }
     }
+    if (unlikely(rc < 0)) {
+        mrb_raise(mrb, E_MSGPACK_ERROR, "cannot pack object");
+    }
 }
 
 MRB_INLINE void
 mrb_msgpack_pack_array_value(mrb_state* mrb, mrb_value self, msgpack_packer* pk)
 {
-    msgpack_pack_array(pk, RARRAY_LEN(self));
+    int rc = msgpack_pack_array(pk, RARRAY_LEN(self));
+    if (unlikely(rc < 0)) {
+        mrb_raise(mrb, E_MSGPACK_ERROR, "cannot pack array");
+    }
     mrb_int ary_pos;
     for (ary_pos = 0; ary_pos != RARRAY_LEN(self); ary_pos++) {
         mrb_msgpack_pack_value(mrb, mrb_ary_ref(mrb, self, ary_pos), pk);
@@ -206,7 +225,10 @@ mrb_msgpack_pack_hash_value(mrb_state* mrb, mrb_value self, msgpack_packer* pk)
 {
     int arena_index = mrb_gc_arena_save(mrb);
     mrb_value keys = mrb_hash_keys(mrb, self);
-    msgpack_pack_map(pk, RARRAY_LEN(keys));
+    int rc = msgpack_pack_map(pk, RARRAY_LEN(keys));
+    if (unlikely(rc < 0)) {
+        mrb_raise(mrb, E_MSGPACK_ERROR, "cannot pack hash");
+    }
     mrb_int hash_pos;
     for (hash_pos = 0; hash_pos != RARRAY_LEN(keys); hash_pos++) {
         mrb_value key = mrb_ary_ref(mrb, keys, hash_pos);
@@ -239,7 +261,7 @@ mrb_msgpack_pack_string(mrb_state* mrb, mrb_value self)
     data.buffer = mrb_str_new(mrb, NULL, 0);
     msgpack_packer_init(&pk, &data, mrb_msgpack_data_write);
 
-    mrb_msgpack_pack_string_value(self, &pk);
+    mrb_msgpack_pack_string_value(mrb, self, &pk);
 
     return data.buffer;
 }
@@ -281,7 +303,7 @@ mrb_msgpack_pack_float(mrb_state* mrb, mrb_value self)
     data.buffer = mrb_str_new(mrb, NULL, 0);
     msgpack_packer_init(&pk, &data, mrb_msgpack_data_write);
 
-    mrb_msgpack_pack_float_value(self, &pk);
+    mrb_msgpack_pack_float_value(mrb, self, &pk);
 
     return data.buffer;
 }
@@ -295,7 +317,7 @@ mrb_msgpack_pack_fixnum(mrb_state* mrb, mrb_value self)
     data.buffer = mrb_str_new(mrb, NULL, 0);
     msgpack_packer_init(&pk, &data, mrb_msgpack_data_write);
 
-    mrb_msgpack_pack_fixnum_value(self, &pk);
+    mrb_msgpack_pack_fixnum_value(mrb, self, &pk);
 
     return data.buffer;
 }
@@ -309,7 +331,10 @@ mrb_msgpack_pack_true(mrb_state* mrb, mrb_value self)
     data.buffer = mrb_str_new(mrb, NULL, 0);
     msgpack_packer_init(&pk, &data, mrb_msgpack_data_write);
 
-    msgpack_pack_true(&pk);
+    int rc = msgpack_pack_true(&pk);
+    if (unlikely(rc < 0)) {
+        mrb_raise(mrb, E_MSGPACK_ERROR, "cannot pack true");
+    }
 
     return data.buffer;
 }
@@ -323,7 +348,10 @@ mrb_msgpack_pack_false(mrb_state* mrb, mrb_value self)
     data.buffer = mrb_str_new(mrb, NULL, 0);
     msgpack_packer_init(&pk, &data, mrb_msgpack_data_write);
 
-    msgpack_pack_false(&pk);
+    int rc = msgpack_pack_false(&pk);
+    if (unlikely(rc < 0)) {
+        mrb_raise(mrb, E_MSGPACK_ERROR, "cannot pack false");
+    }
 
     return data.buffer;
 }
@@ -337,7 +365,10 @@ mrb_msgpack_pack_nil(mrb_state* mrb, mrb_value self)
     data.buffer = mrb_str_new(mrb, NULL, 0);
     msgpack_packer_init(&pk, &data, mrb_msgpack_data_write);
 
-    msgpack_pack_nil(&pk);
+    int rc = msgpack_pack_nil(&pk);
+    if (unlikely(rc < 0)) {
+        mrb_raise(mrb, E_MSGPACK_ERROR, "cannot pack nil");
+    }
 
     return data.buffer;
 }

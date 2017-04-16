@@ -31,6 +31,7 @@ end
 assert("String#to_msgpack") do
   assert_equal('string', MessagePack.unpack('string'.to_msgpack))
   assert_equal('string', MessagePack.unpack(MessagePack.pack('string')))
+  assert_equal("😎", MessagePack.unpack("😎".to_msgpack))
 end
 
 assert("Symbol#to_msgpack") do
