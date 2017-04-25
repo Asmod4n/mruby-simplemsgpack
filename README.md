@@ -55,7 +55,7 @@ Procs, Blocks or Lambdas
 
 mruby allows you to serialize the body of a code block, this wrapper does this via the means of a extension type.
 The type number used by default is 127 (the highest number msgpack allows for extension types), you can change it in mrbgem.rake of this gem.
-To be able to unpack them you need to compile mruby with ```c #define MRB_USE_ETEXT_EDATA```, setable in include/mrbconf.h of your mruby directory.
+To be able to unpack them you need to compile mruby with ```#define MRB_USE_ETEXT_EDATA```, setable in include/mrbconf.h of your mruby directory.
 
 Extension Types
 ---------------
