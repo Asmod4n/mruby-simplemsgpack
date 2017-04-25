@@ -692,6 +692,11 @@ mrb_mruby_simplemsgpack_gem_init(mrb_state* mrb)
 
     const char *version = msgpack_version();
     mrb_define_const(mrb, msgpack_mod, "Version", mrb_str_new_static(mrb, version, strlen(version)));
+#ifdef MRB_USE_ETEXT_EDATA
+    mrb_define_const(mrb, msgpack_mod, "UNPACK_PROCS", mrb_true_value());
+#else
+    mrb_define_const(mrb, msgpack_mod, "UNPACK_PROCS", mrb_false_value());
+#endif
     mrb_define_const(mrb, msgpack_mod, "_ExtPackers", mrb_hash_new(mrb));
     mrb_define_const(mrb, msgpack_mod, "_ExtUnpackers", mrb_hash_new(mrb));
 
