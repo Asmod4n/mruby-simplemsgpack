@@ -76,7 +76,7 @@ mrb_msgpack_pack_proc_value(mrb_state *mrb, mrb_value proc_val, msgpack_packer *
 
     uint8_t *bin = NULL;
     size_t bin_size = 0;
-    int result = mrb_dump_irep(mrb, proc->body.irep, DUMP_ENDIAN_NAT, &bin, &bin_size);
+    int result = mrb_dump_irep(mrb, proc->body.irep, DUMP_ENDIAN_LIL, &bin, &bin_size);
     if (unlikely(result != MRB_DUMP_OK)) {
         mrb_raise(mrb, E_MSGPACK_ERROR, "cannot dump irep");
     }
