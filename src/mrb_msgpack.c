@@ -1,3 +1,6 @@
+#if MRB_MSGPACK_PROC_EXT < 0||MRB_MSGPACK_PROC_EXT > 127
+ #error "MRB_MSGPACK_PROC_EXT must be between 0 and 127 inclusive"
+#endif
 #include "msgpack.h"
 #include <mruby.h>
 #include <mruby/array.h>
@@ -71,7 +74,7 @@ mrb_msgpack_pack_proc_value(mrb_state *mrb, mrb_value proc_val, msgpack_packer *
 {
     struct RProc *proc = mrb_proc_ptr(proc_val);
     if (unlikely(MRB_PROC_CFUNC_P(proc))) {
-        mrb_raise(mrb, E_MSGPACK_ERROR, "cannot pack C proc");
+        mrb_raise(mrb, E_TYPE_ERROR, "cannot pack C proc");
     }
 
     uint8_t *bin = NULL;
@@ -87,8 +90,12 @@ mrb_msgpack_pack_proc_value(mrb_state *mrb, mrb_value proc_val, msgpack_packer *
     MRB_TRY(&c_jmp)
     {
         mrb->jmp = &c_jmp;
-        msgpack_pack_ext(pk, bin_size, MRB_MSGPACK_PROC_EXT);
-        msgpack_pack_ext_body(pk, bin, bin_size);
+        int rc = msgpack_pack_ext(pk, bin_size, MRB_MSGPACK_PROC_EXT);
+        if (likely(rc == 0))
+            rc = msgpack_pack_ext_body(pk, bin, bin_size);
+        if (unlikely(rc < 0))
+            mrb_raise(mrb, E_MSGPACK_ERROR, "cannot pack proc");
+
         mrb_free(mrb, bin);
         mrb->jmp = prev_jmp;
     }
@@ -165,11 +172,14 @@ mrb_msgpack_pack_ext_value(mrb_state* mrb, mrb_value self, msgpack_packer* pk)
     mrb_value packed = mrb_yield(mrb, mrb_hash_get(mrb, ext_config, mrb_symbol_value(mrb_intern_lit(mrb, "packer"))), self);
 
     if (unlikely(!mrb_string_p(packed))) {
-        mrb_raise(mrb, E_MSGPACK_ERROR, "no string returned by ext type packer");
+        mrb_raise(mrb, E_TYPE_ERROR, "no string returned by ext type packer");
     }
 
-    msgpack_pack_ext(pk, RSTRING_LEN(packed), mrb_fixnum(mrb_hash_get(mrb, ext_config, mrb_symbol_value(mrb_intern_lit(mrb, "type")))));
-    msgpack_pack_ext_body(pk, RSTRING_PTR(packed), RSTRING_LEN(packed));
+    int rc = msgpack_pack_ext(pk, RSTRING_LEN(packed), mrb_fixnum(mrb_hash_get(mrb, ext_config, mrb_symbol_value(mrb_intern_lit(mrb, "type")))));
+    if (likely(rc == 0))
+        rc = msgpack_pack_ext_body(pk, RSTRING_PTR(packed), RSTRING_LEN(packed));
+    if (unlikely(rc < 0))
+        mrb_raise(mrb, E_MSGPACK_ERROR, "cannot pack object");
 
     return TRUE;
 }
@@ -441,7 +451,7 @@ mrb_unpack_msgpack_proc(mrb_state *mrb, msgpack_object obj)
 
     return mrb_obj_value(mrb_proc_new(mrb, irep));
 #else
-    mrb_raise(mrb, E_MSGPACK_ERROR, "mruby was compiled without MRB_USE_ETEXT_EDATA, cannot unpack procs");
+    mrb_raise(mrb, E_RUNTIME_ERROR, "mruby was compiled without MRB_USE_ETEXT_EDATA, cannot unpack procs");
 #endif
 }
 
@@ -475,7 +485,7 @@ mrb_unpack_msgpack_obj(mrb_state* mrb, msgpack_object obj)
             return mrb_float_value(mrb, obj.via.f64);
         case MSGPACK_OBJECT_FLOAT64:
 #ifdef MRB_USE_FLOAT
-            mrb_raise(mrb, E_MSGPACK_ERROR, "mruby was compiled with MRB_USE_FLOAT, cannot unpack a double");
+            mrb_raise(mrb, E_RUNTIME_ERROR, "mruby was compiled with MRB_USE_FLOAT, cannot unpack a double");
 #else
             return mrb_float_value(mrb, obj.via.f64);
 #endif
@@ -491,7 +501,6 @@ mrb_unpack_msgpack_obj(mrb_state* mrb, msgpack_object obj)
             if (obj.via.ext.type == MRB_MSGPACK_PROC_EXT) {
                 return mrb_unpack_msgpack_proc(mrb, obj);
             } else {
-
                 mrb_value unpacker = mrb_hash_get(mrb,
                     mrb_const_get(mrb, mrb_obj_value(mrb_module_get(mrb, "MessagePack")), mrb_intern_lit(mrb, "_ExtUnpackers")),
                     mrb_fixnum_value(obj.via.ext.type));
@@ -502,8 +511,6 @@ mrb_unpack_msgpack_obj(mrb_state* mrb, msgpack_object obj)
                 return mrb_yield(mrb, unpacker, mrb_str_new(mrb, obj.via.ext.ptr, obj.via.ext.size));
             }
         }
-        default:
-            mrb_raisef(mrb, E_MSGPACK_ERROR, "Cannot unpack type %S", mrb_fixnum_value(obj.type));
     }
 }
 
@@ -633,12 +640,16 @@ mrb_msgpack_register_pack_type(mrb_state* mrb, mrb_value self)
 
     mrb_get_args(mrb, "iC&", &type, &mrb_class, &block);
 
-    if (type < 0 || type > 127) {
-        mrb_raise(mrb, E_MSGPACK_ERROR, "ext type out of range");
+    if (type == MRB_MSGPACK_PROC_EXT) {
+        mrb_raise(mrb, E_ARGUMENT_ERROR, "type is already registered for procs");
     }
 
-    if (mrb_nil_p(block)) {
-        mrb_raise(mrb, E_MSGPACK_ERROR, "no block given");
+    if (type < 0 || type > 127) {
+        mrb_raise(mrb, E_ARGUMENT_ERROR, "ext type out of range");
+    }
+
+    if (mrb_type(block) != MRB_TT_PROC) {
+        mrb_raise(mrb, E_ARGUMENT_ERROR, "no block given");
     }
 
     ext_packers = mrb_const_get(mrb, self, mrb_intern_lit(mrb, "_ExtPackers"));
@@ -658,12 +669,16 @@ mrb_msgpack_register_unpack_type(mrb_state* mrb, mrb_value self)
 
     mrb_get_args(mrb, "i&", &type, &block);
 
-    if (type < 0 || type > 127) {
-        mrb_raise(mrb, E_MSGPACK_ERROR, "ext type out of range");
+    if (type == MRB_MSGPACK_PROC_EXT) {
+        mrb_raise(mrb, E_ARGUMENT_ERROR, "type is already registered for procs");
     }
 
-    if (mrb_nil_p(block)) {
-        mrb_raise(mrb, E_MSGPACK_ERROR, "no block given");
+    if (type < 0 || type > 127) {
+        mrb_raise(mrb, E_ARGUMENT_ERROR, "ext type out of range");
+    }
+
+    if (mrb_type(block) != MRB_TT_PROC) {
+        mrb_raise(mrb, E_ARGUMENT_ERROR, "no block given");
     }
 
     mrb_hash_set(mrb, mrb_const_get(mrb, self, mrb_intern_lit(mrb, "_ExtUnpackers")), mrb_fixnum_value(type), block);
