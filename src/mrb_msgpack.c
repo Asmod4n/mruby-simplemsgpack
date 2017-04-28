@@ -645,7 +645,7 @@ mrb_msgpack_register_pack_type(mrb_state* mrb, mrb_value self)
     }
 
     if (type < 0 || type > 127) {
-        mrb_raise(mrb, E_ARGUMENT_ERROR, "ext type out of range");
+        mrb_raise(mrb, E_RANGE_ERROR, "ext type out of range");
     }
 
     if (mrb_type(block) != MRB_TT_PROC) {
@@ -674,7 +674,7 @@ mrb_msgpack_register_unpack_type(mrb_state* mrb, mrb_value self)
     }
 
     if (type < 0 || type > 127) {
-        mrb_raise(mrb, E_ARGUMENT_ERROR, "ext type out of range");
+        mrb_raise(mrb, E_RANGE_ERROR, "ext type out of range");
     }
 
     if (mrb_type(block) != MRB_TT_PROC) {
