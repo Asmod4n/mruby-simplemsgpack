@@ -13,3 +13,4 @@ script:
   - rake test
 os:
   - linux
+  - osx
