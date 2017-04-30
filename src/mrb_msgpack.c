@@ -79,9 +79,13 @@ mrb_msgpack_pack_proc_value(mrb_state *mrb, mrb_value proc_val, msgpack_packer *
 
     uint8_t *bin = NULL;
     size_t bin_size = 0;
+#ifdef MRB_DEBUG
+    int result = mrb_dump_irep(mrb, proc->body.irep, DUMP_ENDIAN_LIL|DUMP_DEBUG_INFO, &bin, &bin_size);
+#else
     int result = mrb_dump_irep(mrb, proc->body.irep, DUMP_ENDIAN_LIL, &bin, &bin_size);
+#endif
     if (unlikely(result != MRB_DUMP_OK)) {
-        mrb_raise(mrb, E_MSGPACK_ERROR, "cannot dump irep");
+        mrb_raise(mrb, E_RUNTIME_ERROR, "cannot dump irep");
     }
 
     struct mrb_jmpbuf* prev_jmp = mrb->jmp;

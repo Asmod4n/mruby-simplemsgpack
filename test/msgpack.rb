@@ -99,7 +99,7 @@ assert("MessagePack.unpack with block") do
 end
 
 assert("MessagePack.register_pack_type") do
-  assert_raise(ArgumentError, "ext type out of range") do
+  assert_raise(RangeError, "ext type out of range") do
     MessagePack.register_pack_type(-1, Symbol)
   end
 
@@ -115,7 +115,7 @@ assert("MessagePack.register_pack_type") do
 end
 
 assert("MessagePack.register_unpack_type") do
-  assert_raise(ArgumentError, "ext type out of range") do
+  assert_raise(RangeError, "ext type out of range") do
     MessagePack.register_unpack_type(-1)
   end
 
