@@ -1,7 +1,10 @@
-#if MRB_MSGPACK_PROC_EXT < 0||MRB_MSGPACK_PROC_EXT > 127
+#if (MRB_MSGPACK_PROC_EXT < 0||MRB_MSGPACK_PROC_EXT > 127)
  #error "MRB_MSGPACK_PROC_EXT must be between 0 and 127 inclusive"
 #endif
-#include "msgpack.h"
+#include <msgpack.h>
+#if (MSGPACK_VERSION_MAJOR < 1)
+ #error "mrb-simplemsgpack needs at least msgpack-c 1"
+#endif
 #include <mruby.h>
 #include <mruby/array.h>
 #include <mruby/class.h>
@@ -74,7 +77,7 @@ mrb_msgpack_pack_proc_value(mrb_state *mrb, mrb_value proc_val, msgpack_packer *
 {
     struct RProc *proc = mrb_proc_ptr(proc_val);
     if (unlikely(MRB_PROC_CFUNC_P(proc))) {
-        mrb_raise(mrb, E_TYPE_ERROR, "cannot pack C proc");
+        mrb_raise(mrb, E_TYPE_ERROR, "cannot pack C procs");
     }
 
     uint8_t *bin = NULL;
@@ -115,7 +118,7 @@ mrb_msgpack_pack_proc_value(mrb_state *mrb, mrb_value proc_val, msgpack_packer *
 MRB_INLINE void
 mrb_msgpack_pack_string_value(mrb_state *mrb, mrb_value self, msgpack_packer* pk)
 {
-    int rc = -1;
+    int rc;
     if (mrb_str_is_utf8(self)) {
         rc = msgpack_pack_str(pk, RSTRING_LEN(self));
         if (likely(rc == 0))
@@ -453,7 +456,25 @@ mrb_unpack_msgpack_proc(mrb_state *mrb, msgpack_object obj)
         mrb_raise(mrb, E_SCRIPT_ERROR, "irep load error");
     }
 
-    return mrb_obj_value(mrb_proc_new(mrb, irep));
+    struct mrb_jmpbuf* prev_jmp = mrb->jmp;
+    struct mrb_jmpbuf c_jmp;
+    mrb_value proc = mrb_nil_value();
+
+    MRB_TRY(&c_jmp)
+    {
+        mrb->jmp = &c_jmp;
+        proc = mrb_obj_value(mrb_proc_new(mrb, irep));
+        mrb->jmp = prev_jmp;
+    }
+    MRB_CATCH(&c_jmp)
+    {
+        mrb->jmp = prev_jmp;
+        mrb_irep_decref(mrb, irep);
+        MRB_THROW(mrb->jmp);
+    }
+    MRB_END_EXC(&c_jmp);
+
+    return proc;
 #else
     mrb_raise(mrb, E_RUNTIME_ERROR, "mruby was compiled without MRB_USE_ETEXT_EDATA, cannot unpack procs");
 #endif
@@ -485,13 +506,18 @@ mrb_unpack_msgpack_obj(mrb_state* mrb, msgpack_object obj)
             }
             return mrb_float_value(mrb, obj.via.i64);
         }
+#if defined(MSGPACK_OBJECT_FLOAT32) && defined(MSGPACK_OBJECT_FLOAT64)
         case MSGPACK_OBJECT_FLOAT32:
             return mrb_float_value(mrb, obj.via.f64);
         case MSGPACK_OBJECT_FLOAT64:
-#ifdef MRB_USE_FLOAT
-            mrb_raise(mrb, E_RUNTIME_ERROR, "mruby was compiled with MRB_USE_FLOAT, cannot unpack a double");
-#else
+    #ifndef MRB_USE_FLOAT
             return mrb_float_value(mrb, obj.via.f64);
+    #else
+            mrb_raise(mrb, E_RUNTIME_ERROR, "mruby was compiled with MRB_USE_FLOAT, cannot unpack a double");
+    #endif
+#else
+        case MSGPACK_OBJECT_FLOAT:
+            return mrb_float_value(mrb, obj.via.f64);;
 #endif
         case MSGPACK_OBJECT_STR:
             return mrb_str_new(mrb, obj.via.str.ptr, obj.via.str.size);

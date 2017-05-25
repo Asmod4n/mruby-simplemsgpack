@@ -3,6 +3,18 @@
 mruby-simplemsgpack
 ===================
 
+Installation
+============
+First get a working copy of [mruby](https://github.com/mruby/mruby) then add
+```ruby
+  conf.gem mgem: 'mruby-simplemsgpack'
+```
+to the build_conf.rb of the mruby directory
+
+mruby-simplemsgpack searches for msgpack-c on your system, if it can find it it links against it, there is also a bundled version of msgpack-c included if you don't have it installed in your system.
+You need at least msgpack-c 1.
+If you are on debian you can find it in testing, debian stable ships a version of msgpack-c which is incompatible.
+
 Example
 -------
 
