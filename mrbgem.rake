@@ -8,7 +8,7 @@ MRuby::Gem::Specification.new('mruby-simplemsgpack') do |spec|
   spec.add_conflict 'mruby-msgpack'
   spec.cc.defines << 'MRB_MSGPACK_PROC_EXT=127'
 
-  if spec.cc.search_header_path 'msgpack.h'
+  if spec.cc.search_header_path 'msgpack.h' && spec.cc.search_header_path('msgpack/version_master.h')
     if spec.build.toolchains.include? 'visualcpp'
       spec.linker.libraries << 'libmsgpackc'
     else
