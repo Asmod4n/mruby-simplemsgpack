@@ -15,12 +15,12 @@ MRuby::Gem::Specification.new('mruby-simplemsgpack') do |spec|
       spec.linker.libraries << 'msgpackc'
     end
   else
-    msgpackc = "#{spec.dir}#{build.file_separator}msgpack-c"
-    spec.cc.include_paths << "#{msgpackc}#{build.file_separator}include"
+    msgpackc = "#{spec.dir}/msgpack-c"
+    spec.cc.include_paths << "#{msgpackc}/include"
     spec.objs += %W(
-      #{msgpackc}#{build.file_separator}src#{build.file_separator}unpack.c
-      #{msgpackc}#{build.file_separator}src#{build.file_separator}version.c
-      #{msgpackc}#{build.file_separator}src#{build.file_separator}zone.c
-    ).map { |f| f.relative_path_from(dir).pathmap("#{build_dir}#{build.file_separator}%X#{spec.exts.object}" ) }
+      #{msgpackc}/src/unpack.c
+      #{msgpackc}/src/version.c
+      #{msgpackc}/src/zone.c
+    ).map { |f| f.relative_path_from(dir).pathmap("#{build_dir}/%X#{spec.exts.object}" ) }
   end
 end

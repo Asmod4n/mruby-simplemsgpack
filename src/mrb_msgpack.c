@@ -506,7 +506,7 @@ mrb_unpack_msgpack_obj(mrb_state* mrb, msgpack_object obj)
             }
             return mrb_float_value(mrb, obj.via.i64);
         }
-#if defined(MSGPACK_OBJECT_FLOAT32) && defined(MSGPACK_OBJECT_FLOAT64)
+#if ((MSGPACK_VERSION_MAJOR == 2) && (MSGPACK_VERSION_MINOR >= 1)) || (MSGPACK_VERSION_MAJOR >= 2)
         case MSGPACK_OBJECT_FLOAT32:
             return mrb_float_value(mrb, obj.via.f64);
         case MSGPACK_OBJECT_FLOAT64:
@@ -517,7 +517,7 @@ mrb_unpack_msgpack_obj(mrb_state* mrb, msgpack_object obj)
     #endif
 #else
         case MSGPACK_OBJECT_FLOAT:
-            return mrb_float_value(mrb, obj.via.f64);;
+            return mrb_float_value(mrb, obj.via.f64);
 #endif
         case MSGPACK_OBJECT_STR:
             return mrb_str_new(mrb, obj.via.str.ptr, obj.via.str.size);
