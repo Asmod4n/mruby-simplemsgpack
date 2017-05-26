@@ -506,7 +506,7 @@ mrb_unpack_msgpack_obj(mrb_state* mrb, msgpack_object obj)
             }
             return mrb_float_value(mrb, obj.via.i64);
         }
-#if ((MSGPACK_VERSION_MAJOR == 2) && (MSGPACK_VERSION_MINOR >= 1)) || (MSGPACK_VERSION_MAJOR >= 2)
+#if (((MSGPACK_VERSION_MAJOR == 2) && (MSGPACK_VERSION_MINOR >= 1)) || (MSGPACK_VERSION_MAJOR > 2))
         case MSGPACK_OBJECT_FLOAT32:
             return mrb_float_value(mrb, obj.via.f64);
         case MSGPACK_OBJECT_FLOAT64:
