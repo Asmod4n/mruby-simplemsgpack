@@ -692,6 +692,15 @@ mrb_msgpack_register_pack_type(mrb_state* mrb, mrb_value self)
 }
 
 static mrb_value
+mrb_msgpack_ext_packer_registered(mrb_state *mrb, mrb_value self)
+{
+    mrb_value mrb_class;
+    mrb_get_args(mrb, "C", &mrb_class);
+
+    return mrb_bool_value(!mrb_nil_p(mrb_hash_get(mrb, mrb_const_get(mrb, self, mrb_intern_lit(mrb, "_ExtPackers")), mrb_class)));
+}
+
+static mrb_value
 mrb_msgpack_register_unpack_type(mrb_state* mrb, mrb_value self)
 {
     mrb_int type;
@@ -716,6 +725,15 @@ mrb_msgpack_register_unpack_type(mrb_state* mrb, mrb_value self)
     return mrb_nil_value();
 }
 
+static mrb_value
+mrb_msgpack_ext_unpacker_registered(mrb_state *mrb, mrb_value self)
+{
+    mrb_int type;
+    mrb_get_args(mrb, "i", &type);
+
+    return mrb_bool_value(!mrb_nil_p(mrb_hash_get(mrb, mrb_const_get(mrb, self, mrb_intern_lit(mrb, "_ExtUnpackers")), mrb_fixnum_value(type))));
+}
+
 void
 mrb_mruby_simplemsgpack_gem_init(mrb_state* mrb)
 {
@@ -735,8 +753,8 @@ mrb_mruby_simplemsgpack_gem_init(mrb_state* mrb)
     msgpack_mod = mrb_define_module(mrb, "MessagePack");
     mrb_define_class_under(mrb, msgpack_mod, "Error", E_RUNTIME_ERROR);
 
-    const char *version = msgpack_version();
-    mrb_define_const(mrb, msgpack_mod, "Version", mrb_str_new_static(mrb, version, strlen(version)));
+    static const char *mrb_msgpack_version = MSGPACK_VERSION;
+    mrb_define_const(mrb, msgpack_mod, "Version", mrb_str_new_static(mrb, mrb_msgpack_version, strlen(mrb_msgpack_version)));
 #ifdef MRB_USE_ETEXT_EDATA
     mrb_define_const(mrb, msgpack_mod, "UNPACK_PROCS", mrb_true_value());
 #else
@@ -748,7 +766,9 @@ mrb_mruby_simplemsgpack_gem_init(mrb_state* mrb)
     mrb_define_module_function(mrb, msgpack_mod, "pack", mrb_msgpack_pack, (MRB_ARGS_REQ(1)));
     mrb_define_module_function(mrb, msgpack_mod, "unpack", mrb_msgpack_unpack, (MRB_ARGS_REQ(1)|MRB_ARGS_BLOCK()));
     mrb_define_module_function(mrb, msgpack_mod, "register_pack_type", mrb_msgpack_register_pack_type, (MRB_ARGS_REQ(2)|MRB_ARGS_BLOCK()));
+    mrb_define_module_function(mrb, msgpack_mod, "ext_packer_registered?", mrb_msgpack_ext_packer_registered, MRB_ARGS_REQ(1));
     mrb_define_module_function(mrb, msgpack_mod, "register_unpack_type", mrb_msgpack_register_unpack_type, (MRB_ARGS_REQ(1)|MRB_ARGS_BLOCK()));
+    mrb_define_module_function(mrb, msgpack_mod, "ext_unpacker_registered?", mrb_msgpack_ext_unpacker_registered, MRB_ARGS_REQ(1));
 }
 
 void mrb_mruby_simplemsgpack_gem_final(mrb_state* mrb) { }
