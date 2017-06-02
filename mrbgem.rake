@@ -8,13 +8,7 @@ MRuby::Gem::Specification.new('mruby-simplemsgpack') do |spec|
   spec.add_conflict 'mruby-msgpack'
   spec.cc.defines << 'MRB_MSGPACK_PROC_EXT=127'
 
-  if spec.cc.search_header_path('msgpack.h') && spec.cc.search_header_path('msgpack/version_master.h')
-    if spec.build.toolchains.include? 'visualcpp'
-      spec.linker.libraries << 'libmsgpackc'
-    else
-      spec.linker.libraries << 'msgpackc'
-    end
-  else
+  if build.is_a?(MRuby::CrossBuild)
     msgpackc = "#{spec.dir}/msgpack-c"
     spec.cc.include_paths << "#{msgpackc}/include"
     spec.objs += %W(
@@ -22,5 +16,21 @@ MRuby::Gem::Specification.new('mruby-simplemsgpack') do |spec|
       #{msgpackc}/src/version.c
       #{msgpackc}/src/zone.c
     ).map { |f| f.relative_path_from(dir).pathmap("#{build_dir}/%X#{spec.exts.object}" ) }
+  else
+    if spec.cc.search_header_path('msgpack.h') && spec.cc.search_header_path('msgpack/version_master.h')
+      if spec.build.toolchains.include? 'visualcpp'
+        spec.linker.libraries << 'libmsgpackc'
+      else
+        spec.linker.libraries << 'msgpackc'
+      end
+    else
+      msgpackc = "#{spec.dir}/msgpack-c"
+      spec.cc.include_paths << "#{msgpackc}/include"
+      spec.objs += %W(
+        #{msgpackc}/src/unpack.c
+        #{msgpackc}/src/version.c
+        #{msgpackc}/src/zone.c
+      ).map { |f| f.relative_path_from(dir).pathmap("#{build_dir}/%X#{spec.exts.object}" ) }
+    end
   end
 end
