@@ -1,6 +1,3 @@
-#if (MRB_MSGPACK_PROC_EXT < 0||MRB_MSGPACK_PROC_EXT > 127)
- #error "MRB_MSGPACK_PROC_EXT must be between 0 and 127 inclusive"
-#endif
 #include <msgpack.h>
 #if (MSGPACK_VERSION_MAJOR < 1)
  #error "mrb-simplemsgpack needs at least msgpack-c 1"
@@ -17,8 +14,6 @@
 #include <mruby/variable.h>
 #include <mruby/numeric.h>
 #include "mruby/msgpack.h"
-#include <mruby/dump.h>
-#include <mruby/proc.h>
 
 typedef struct {
     mrb_state* mrb;
@@ -70,49 +65,6 @@ mrb_msgpack_pack_float_value(mrb_state *mrb, mrb_value self, msgpack_packer* pk)
     if (unlikely(rc < 0)) {
         mrb_raise(mrb, E_MSGPACK_ERROR, "cannot pack float");
     }
-}
-
-MRB_INLINE void
-mrb_msgpack_pack_proc_value(mrb_state *mrb, mrb_value proc_val, msgpack_packer *pk)
-{
-    struct RProc *proc = mrb_proc_ptr(proc_val);
-    if (unlikely(MRB_PROC_CFUNC_P(proc))) {
-        mrb_raise(mrb, E_TYPE_ERROR, "cannot pack C procs");
-    }
-
-    uint8_t *bin = NULL;
-    size_t bin_size = 0;
-#ifdef MRB_DEBUG
-    int result = mrb_dump_irep(mrb, proc->body.irep, DUMP_ENDIAN_LIL|DUMP_DEBUG_INFO, &bin, &bin_size);
-#else
-    int result = mrb_dump_irep(mrb, proc->body.irep, DUMP_ENDIAN_LIL, &bin, &bin_size);
-#endif
-    if (unlikely(result != MRB_DUMP_OK)) {
-        mrb_raise(mrb, E_RUNTIME_ERROR, "cannot dump irep");
-    }
-
-    struct mrb_jmpbuf* prev_jmp = mrb->jmp;
-    struct mrb_jmpbuf c_jmp;
-
-    MRB_TRY(&c_jmp)
-    {
-        mrb->jmp = &c_jmp;
-        int rc = msgpack_pack_ext(pk, bin_size, MRB_MSGPACK_PROC_EXT);
-        if (likely(rc == 0))
-            rc = msgpack_pack_ext_body(pk, bin, bin_size);
-        if (unlikely(rc < 0))
-            mrb_raise(mrb, E_MSGPACK_ERROR, "cannot pack proc");
-
-        mrb_free(mrb, bin);
-        mrb->jmp = prev_jmp;
-    }
-    MRB_CATCH(&c_jmp)
-    {
-        mrb->jmp = prev_jmp;
-        mrb_free(mrb, bin);
-        MRB_THROW(mrb->jmp);
-    }
-    MRB_END_EXC(&c_jmp);
 }
 
 MRB_INLINE void
@@ -218,9 +170,6 @@ mrb_msgpack_pack_value(mrb_state* mrb, mrb_value self, msgpack_packer* pk)
         case MRB_TT_FLOAT:
             mrb_msgpack_pack_float_value(mrb, self, pk);
             break;
-        case MRB_TT_PROC:
-            mrb_msgpack_pack_proc_value(mrb, self, pk);
-            break;
         case MRB_TT_ARRAY:
             mrb_msgpack_pack_array_value(mrb, self, pk);
             break;
@@ -304,20 +253,6 @@ mrb_msgpack_pack_object(mrb_state* mrb, mrb_value self)
     msgpack_packer_init(&pk, &data, mrb_msgpack_data_write);
 
     mrb_msgpack_pack_value(mrb, self, &pk);
-
-    return data.buffer;
-}
-
-static mrb_value
-mrb_msgpack_pack_proc(mrb_state* mrb, mrb_value self)
-{
-    msgpack_packer pk;
-    mrb_msgpack_data data;
-    data.mrb = mrb;
-    data.buffer = mrb_str_new(mrb, NULL, 0);
-    msgpack_packer_init(&pk, &data, mrb_msgpack_data_write);
-
-    mrb_msgpack_pack_proc_value(mrb, self, &pk);
 
     return data.buffer;
 }
@@ -444,43 +379,6 @@ mrb_msgpack_pack_nil(mrb_state* mrb, mrb_value self)
 }
 
 MRB_INLINE mrb_value
-mrb_unpack_msgpack_proc(mrb_state *mrb, msgpack_object obj)
-{
-#ifdef MRB_USE_ETEXT_EDATA
-    uint8_t *bin = mrb_malloc(mrb, obj.via.ext.size);
-    memcpy(bin, obj.via.ext.ptr, obj.via.ext.size);
-    mrb_irep *irep = mrb_read_irep(mrb, bin);
-    mrb_free(mrb, bin);
-
-    if (!irep) {
-        mrb_raise(mrb, E_SCRIPT_ERROR, "irep load error");
-    }
-
-    struct mrb_jmpbuf* prev_jmp = mrb->jmp;
-    struct mrb_jmpbuf c_jmp;
-    mrb_value proc = mrb_nil_value();
-
-    MRB_TRY(&c_jmp)
-    {
-        mrb->jmp = &c_jmp;
-        proc = mrb_obj_value(mrb_proc_new(mrb, irep));
-        mrb->jmp = prev_jmp;
-    }
-    MRB_CATCH(&c_jmp)
-    {
-        mrb->jmp = prev_jmp;
-        mrb_irep_decref(mrb, irep);
-        MRB_THROW(mrb->jmp);
-    }
-    MRB_END_EXC(&c_jmp);
-
-    return proc;
-#else
-    mrb_raise(mrb, E_RUNTIME_ERROR, "mruby was compiled without MRB_USE_ETEXT_EDATA, cannot unpack procs");
-#endif
-}
-
-MRB_INLINE mrb_value
 mrb_unpack_msgpack_obj_array(mrb_state* mrb, msgpack_object obj);
 
 MRB_INLINE mrb_value
@@ -528,18 +426,14 @@ mrb_unpack_msgpack_obj(mrb_state* mrb, msgpack_object obj)
         case MSGPACK_OBJECT_BIN:
             return mrb_str_new(mrb, obj.via.bin.ptr, obj.via.bin.size);
         case MSGPACK_OBJECT_EXT: {
-            if (obj.via.ext.type == MRB_MSGPACK_PROC_EXT) {
-                return mrb_unpack_msgpack_proc(mrb, obj);
-            } else {
-                mrb_value unpacker = mrb_hash_get(mrb,
-                    mrb_const_get(mrb, mrb_obj_value(mrb_module_get(mrb, "MessagePack")), mrb_intern_lit(mrb, "_ExtUnpackers")),
-                    mrb_fixnum_value(obj.via.ext.type));
-                if (unlikely(mrb_type(unpacker) != MRB_TT_PROC)) {
-                    mrb_raisef(mrb, E_MSGPACK_ERROR, "Cannot unpack ext type %S", mrb_fixnum_value(obj.via.ext.type));
-                }
-
-                return mrb_yield(mrb, unpacker, mrb_str_new(mrb, obj.via.ext.ptr, obj.via.ext.size));
+            mrb_value unpacker = mrb_hash_get(mrb,
+                mrb_const_get(mrb, mrb_obj_value(mrb_module_get(mrb, "MessagePack")), mrb_intern_lit(mrb, "_ExtUnpackers")),
+                mrb_fixnum_value(obj.via.ext.type));
+            if (unlikely(mrb_type(unpacker) != MRB_TT_PROC)) {
+                mrb_raisef(mrb, E_MSGPACK_ERROR, "Cannot unpack ext type %S", mrb_fixnum_value(obj.via.ext.type));
             }
+
+            return mrb_yield(mrb, unpacker, mrb_str_new(mrb, obj.via.ext.ptr, obj.via.ext.size));
         }
     }
 }
@@ -550,7 +444,7 @@ mrb_unpack_msgpack_obj_array(mrb_state* mrb, msgpack_object obj)
     if (obj.via.array.size != 0) {
         mrb_value unpacked_array = mrb_ary_new_capa(mrb, obj.via.array.size);
         int arena_index = mrb_gc_arena_save(mrb);
-        size_t array_pos;
+        uint32_t array_pos;
         for (array_pos = 0; array_pos < obj.via.array.size; array_pos++) {
             mrb_ary_push(mrb, unpacked_array, mrb_unpack_msgpack_obj(mrb, obj.via.array.ptr[array_pos]));
             mrb_gc_arena_restore(mrb, arena_index);
@@ -568,7 +462,7 @@ mrb_unpack_msgpack_obj_map(mrb_state* mrb, msgpack_object obj)
     if (obj.via.map.size != 0) {
         mrb_value unpacked_hash = mrb_hash_new_capa(mrb, obj.via.map.size);
         int arena_index = mrb_gc_arena_save(mrb);
-        size_t map_pos;
+        uint32_t map_pos;
         for (map_pos = 0; map_pos < obj.via.map.size; map_pos++) {
             mrb_hash_set(mrb, unpacked_hash,
                 mrb_unpack_msgpack_obj(mrb, obj.via.map.ptr[map_pos].key),
@@ -670,10 +564,6 @@ mrb_msgpack_register_pack_type(mrb_state* mrb, mrb_value self)
 
     mrb_get_args(mrb, "iC&", &type, &mrb_class, &block);
 
-    if (type == MRB_MSGPACK_PROC_EXT) {
-        mrb_raise(mrb, E_ARGUMENT_ERROR, "type is already registered for procs");
-    }
-
     if (type < 0 || type > 127) {
         mrb_raise(mrb, E_RANGE_ERROR, "ext type out of range");
     }
@@ -708,10 +598,6 @@ mrb_msgpack_register_unpack_type(mrb_state* mrb, mrb_value self)
 
     mrb_get_args(mrb, "i&", &type, &block);
 
-    if (type == MRB_MSGPACK_PROC_EXT) {
-        mrb_raise(mrb, E_ARGUMENT_ERROR, "type is already registered for procs");
-    }
-
     if (type < 0 || type > 127) {
         mrb_raise(mrb, E_RANGE_ERROR, "ext type out of range");
     }
@@ -740,7 +626,6 @@ mrb_mruby_simplemsgpack_gem_init(mrb_state* mrb)
     struct RClass* msgpack_mod;
 
     mrb_define_method(mrb, mrb->object_class, "to_msgpack", mrb_msgpack_pack_object, MRB_ARGS_NONE());
-    mrb_define_method(mrb, mrb->proc_class, "to_msgpack", mrb_msgpack_pack_proc, MRB_ARGS_NONE());
     mrb_define_method(mrb, mrb->string_class, "to_msgpack", mrb_msgpack_pack_string, MRB_ARGS_NONE());
     mrb_define_method(mrb, mrb->array_class, "to_msgpack", mrb_msgpack_pack_array, MRB_ARGS_NONE());
     mrb_define_method(mrb, mrb->hash_class, "to_msgpack", mrb_msgpack_pack_hash, MRB_ARGS_NONE());
@@ -755,11 +640,6 @@ mrb_mruby_simplemsgpack_gem_init(mrb_state* mrb)
 
     static const char *mrb_msgpack_version = MSGPACK_VERSION;
     mrb_define_const(mrb, msgpack_mod, "Version", mrb_str_new_static(mrb, mrb_msgpack_version, strlen(mrb_msgpack_version)));
-#ifdef MRB_USE_ETEXT_EDATA
-    mrb_define_const(mrb, msgpack_mod, "UNPACK_PROCS", mrb_true_value());
-#else
-    mrb_define_const(mrb, msgpack_mod, "UNPACK_PROCS", mrb_false_value());
-#endif
     mrb_define_const(mrb, msgpack_mod, "_ExtPackers", mrb_hash_new(mrb));
     mrb_define_const(mrb, msgpack_mod, "_ExtUnpackers", mrb_hash_new(mrb));
 

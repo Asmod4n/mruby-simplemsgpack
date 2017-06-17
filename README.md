@@ -62,13 +62,6 @@ unpacked_length # => 4 (length of packed_string)
 unpacked # => ['bye']
 ```
 
-Procs, Blocks or Lambdas
-========================
-
-mruby allows you to serialize the body of a code block, this wrapper does this via the means of a extension type.
-The type number used by default is 127 (the highest number msgpack allows for extension types), you can change it in mrbgem.rake of this gem.
-To be able to unpack them you need to compile mruby with ```#define MRB_USE_ETEXT_EDATA```, setable in include/mrbconf.h of your mruby directory.
-
 Extension Types
 ---------------
 
@@ -93,11 +86,15 @@ cls_ext_type = 1
 MessagePack.register_pack_type(cls_ext_type, Class) { |cls| cls.to_s }
 MessagePack.register_unpack_type(cls_ext_type) { |data| data.constantize }
 MessagePack.unpack(Object.to_msgpack) # => Object
-````
+```
 
 For nil, true, false, Fixnum, Float, String, Array and Hash a registered
 ext type is ignored. They are always packed according to the [MessagePack
 specification](https://github.com/msgpack/msgpack/blob/master/spec.md).
+
+Proc, blocks or lambas
+-----------------------
+If you want to pack and unpack mruby blocks take a look at the [mruby-proc-irep-ext](https://github.com/Asmod4n/mruby-proc-irep-ext) gem, it can be registered like the other extension types
 
 Acknowledgements
 ----------------

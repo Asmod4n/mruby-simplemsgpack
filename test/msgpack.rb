@@ -28,14 +28,6 @@ assert("Float#to_msgpack") do
   assert_equal(2.2250738585072014e-308, MessagePack.unpack(2.2250738585072014e-308.to_msgpack))
 end
 
-assert("Proc#to_msgpack") do
-  if MessagePack::UNPACK_PROCS
-    hallo = lambda {|val| val}
-    proc = MessagePack.unpack(hallo.to_msgpack)
-    assert_equal(1, proc.call(1))
-  end
-end
-
 assert("String#to_msgpack") do
   assert_equal('string', MessagePack.unpack('string'.to_msgpack))
   assert_equal('string', MessagePack.unpack(MessagePack.pack('string')))
