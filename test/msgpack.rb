@@ -14,6 +14,8 @@ assert("TrueClass#to_msgpack") do
 end
 
 assert("Integer#to_msgpack") do
+  assert_equal(0, MessagePack.unpack(0.to_msgpack))
+  assert_equal(0, MessagePack.unpack(MessagePack.pack(0)))
   assert_equal(1, MessagePack.unpack(1.to_msgpack))
   assert_equal(1, MessagePack.unpack(MessagePack.pack(1)))
   assert_equal(-1, MessagePack.unpack(-1.to_msgpack))
