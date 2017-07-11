@@ -393,13 +393,13 @@ mrb_unpack_msgpack_obj(mrb_state* mrb, msgpack_object obj)
         case MSGPACK_OBJECT_BOOLEAN:
             return mrb_bool_value(obj.via.boolean);
         case MSGPACK_OBJECT_POSITIVE_INTEGER: {
-            if (FIXABLE(obj.via.u64)) {
+            if (POSFIXABLE(obj.via.u64)) {
               return mrb_fixnum_value(obj.via.u64);
             }
             return mrb_float_value(mrb, obj.via.u64);
         }
         case MSGPACK_OBJECT_NEGATIVE_INTEGER: {
-            if (FIXABLE(obj.via.i64)) {
+            if (NEGFIXABLE(obj.via.i64)) {
               return mrb_fixnum_value(obj.via.i64);
             }
             return mrb_float_value(mrb, obj.via.i64);
