@@ -14,18 +14,28 @@ assert("TrueClass#to_msgpack") do
 end
 
 assert("Integer#to_msgpack") do
-  [-2**63, -1, 0, 1, 2**64-1].each do |int|
-    assert_equal(int, MessagePack.unpack(int.to_msgpack))
-    assert_equal(int, MessagePack.unpack(MessagePack.pack(int)))
+  [Mrbtest::FIXNUM_MIN, -1, 0, 1, Mrbtest::FIXNUM_MAX].each do |int|
+    expected = int
+
+    actual = MessagePack.unpack(int.to_msgpack)
+    assert_true actual.equal?(expected), "Expected identity", assertion_diff(expected, actual)
+
+    actual = MessagePack.unpack(MessagePack.pack(int))
+    assert_true actual.equal?(expected), "Expected identity", assertion_diff(expected, actual)
   end
 end
 
 assert("Float#to_msgpack") do
-  neg_floats = [-1.7976931348623157e+308, -1.0, -2.2250738585072014e-308]
-  pos_floats = [2.2250738585072014e-308, 1.0, 1.7976931348623157e+308]
+  neg_floats = [-1.7976931348623157e+308, Mrbtest::FIXNUM_MIN-1, -1.0, -2.2250738585072014e-308]
+  pos_floats = [2.2250738585072014e-308, 1.0, Mrbtest::FIXNUM_MAX+1, 1.7976931348623157e+308]
   [*neg_floats, 0.0, *pos_floats].each do |float|
-    assert_equal(float, MessagePack.unpack(float.to_msgpack))
-    assert_equal(float, MessagePack.unpack(MessagePack.pack(float)))
+    expected = float
+
+    actual = MessagePack.unpack(float.to_msgpack)
+    assert_true actual.equal?(expected), "Expected identity", assertion_diff(expected, actual)
+
+    actual = MessagePack.unpack(MessagePack.pack(float))
+    assert_true actual.equal?(expected), "Expected identity", assertion_diff(expected, actual)
   end
 end
 
