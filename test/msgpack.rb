@@ -14,20 +14,29 @@ assert("TrueClass#to_msgpack") do
 end
 
 assert("Integer#to_msgpack") do
-  assert_equal(0, MessagePack.unpack(0.to_msgpack))
-  assert_equal(0, MessagePack.unpack(MessagePack.pack(0)))
-  assert_equal(1, MessagePack.unpack(1.to_msgpack))
-  assert_equal(1, MessagePack.unpack(MessagePack.pack(1)))
-  assert_equal(-1, MessagePack.unpack(-1.to_msgpack))
-  assert_equal(-2**63, MessagePack.unpack((-2**63).to_msgpack))
-  assert_equal(2**64-1, MessagePack.unpack((2**64-1).to_msgpack))
+  [Mrbtest::FIXNUM_MIN, -1, 0, 1, Mrbtest::FIXNUM_MAX].each do |int|
+    expected = int
+
+    actual = MessagePack.unpack(int.to_msgpack)
+    assert_true actual.equal?(expected), "Expected identity", assertion_diff(expected, actual)
+
+    actual = MessagePack.unpack(MessagePack.pack(int))
+    assert_true actual.equal?(expected), "Expected identity", assertion_diff(expected, actual)
+  end
 end
 
 assert("Float#to_msgpack") do
-  assert_equal(1.2, MessagePack.unpack(1.2.to_msgpack))
-  assert_equal(1.2, MessagePack.unpack(MessagePack.pack(1.2)))
-  assert_equal(1.7976931348623157e+308, MessagePack.unpack(1.7976931348623157e+308.to_msgpack))
-  assert_equal(2.2250738585072014e-308, MessagePack.unpack(2.2250738585072014e-308.to_msgpack))
+  neg_floats = [-1.7976931348623157e+308, Mrbtest::FIXNUM_MIN-1, -1.0, -2.2250738585072014e-308]
+  pos_floats = [2.2250738585072014e-308, 1.0, Mrbtest::FIXNUM_MAX+1, 1.7976931348623157e+308]
+  [*neg_floats, 0.0, *pos_floats].each do |float|
+    expected = float
+
+    actual = MessagePack.unpack(float.to_msgpack)
+    assert_true actual.equal?(expected), "Expected identity", assertion_diff(expected, actual)
+
+    actual = MessagePack.unpack(MessagePack.pack(float))
+    assert_true actual.equal?(expected), "Expected identity", assertion_diff(expected, actual)
+  end
 end
 
 assert("String#to_msgpack") do
