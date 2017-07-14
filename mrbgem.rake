@@ -4,7 +4,6 @@ MRuby::Gem::Specification.new('mruby-simplemsgpack') do |spec|
   spec.homepage = 'https://github.com/Asmod4n/mruby-simplemsgpack'
   spec.authors = File.readlines("#{spec.dir}/AUTHORS").map(&:strip)
   spec.add_dependency 'mruby-errno'
-  spec.add_dependency 'mruby-string-is-utf8'
   spec.add_conflict 'mruby-msgpack'
 
   if build.is_a?(MRuby::CrossBuild)

@@ -9,11 +9,11 @@
 #include <mruby/error.h>
 #include <mruby/hash.h>
 #include <mruby/string.h>
-#include <mruby/string_is_utf8.h>
 #include <mruby/throw.h>
 #include <mruby/variable.h>
 #include <mruby/numeric.h>
 #include "mruby/msgpack.h"
+#include <string.h>
 
 typedef struct {
     mrb_state* mrb;
@@ -71,14 +71,14 @@ MRB_INLINE void
 mrb_msgpack_pack_string_value(mrb_state *mrb, mrb_value self, msgpack_packer* pk)
 {
     int rc;
-    if (mrb_str_is_utf8(self)) {
-        rc = msgpack_pack_str(pk, RSTRING_LEN(self));
-        if (likely(rc == 0))
-            rc = msgpack_pack_str_body(pk, RSTRING_PTR(self), RSTRING_LEN(self));
-    } else {
+    if (memchr(RSTRING_PTR(self), 0, RSTRING_LEN(self))) {
         rc = msgpack_pack_bin(pk, RSTRING_LEN(self));
         if (likely(rc == 0))
             rc = msgpack_pack_bin_body(pk, RSTRING_PTR(self), RSTRING_LEN(self));
+    } else {
+        rc = msgpack_pack_str(pk, RSTRING_LEN(self));
+        if (likely(rc == 0))
+            rc = msgpack_pack_str_body(pk, RSTRING_PTR(self), RSTRING_LEN(self));
     }
     if (unlikely(rc < 0)) {
         mrb_raise(mrb, E_MSGPACK_ERROR, "cannot pack string");
