@@ -85,7 +85,7 @@ mrb_msgpack_pack_string_value(mrb_state *mrb, mrb_value self, msgpack_packer* pk
     }
 }
 
-MRB_INLINE mrb_value
+static mrb_value
 mrb_msgpack_get_ext_config(mrb_state* mrb, mrb_value obj)
 {
     mrb_value ext_packers = mrb_const_get(mrb,
@@ -119,7 +119,7 @@ mrb_msgpack_get_ext_config(mrb_state* mrb, mrb_value obj)
     return mrb_nil_value();
 }
 
-MRB_INLINE mrb_bool
+static mrb_bool
 mrb_msgpack_pack_ext_value(mrb_state* mrb, mrb_value self, msgpack_packer* pk)
 {
     mrb_value ext_config = mrb_msgpack_get_ext_config(mrb, self);
@@ -220,7 +220,7 @@ mrb_msgpack_pack_array_value(mrb_state* mrb, mrb_value self, msgpack_packer* pk)
         mrb_raise(mrb, E_MSGPACK_ERROR, "cannot pack array");
     }
     mrb_int ary_pos;
-    for (ary_pos = 0; ary_pos != RARRAY_LEN(self); ary_pos++) {
+    for (ary_pos = 0; ary_pos < RARRAY_LEN(self); ary_pos++) {
         mrb_msgpack_pack_value(mrb, mrb_ary_ref(mrb, self, ary_pos), pk);
     }
 }
@@ -235,7 +235,7 @@ mrb_msgpack_pack_hash_value(mrb_state* mrb, mrb_value self, msgpack_packer* pk)
         mrb_raise(mrb, E_MSGPACK_ERROR, "cannot pack hash");
     }
     mrb_int hash_pos;
-    for (hash_pos = 0; hash_pos != RARRAY_LEN(keys); hash_pos++) {
+    for (hash_pos = 0; hash_pos < RARRAY_LEN(keys); hash_pos++) {
         mrb_value key = mrb_ary_ref(mrb, keys, hash_pos);
         mrb_msgpack_pack_value(mrb, key, pk);
         mrb_msgpack_pack_value(mrb, mrb_hash_get(mrb, self, key), pk);
@@ -587,7 +587,7 @@ mrb_msgpack_ext_packer_registered(mrb_state *mrb, mrb_value self)
     mrb_value mrb_class;
     mrb_get_args(mrb, "C", &mrb_class);
 
-    return mrb_bool_value(!mrb_nil_p(mrb_hash_get(mrb, mrb_const_get(mrb, self, mrb_intern_lit(mrb, "_ExtPackers")), mrb_class)));
+    return mrb_bool_value(mrb_test(mrb_hash_get(mrb, mrb_const_get(mrb, self, mrb_intern_lit(mrb, "_ExtPackers")), mrb_class)));
 }
 
 static mrb_value
