@@ -197,3 +197,7 @@ assert("Extension types for modules") do
   assert_equal(Object.new.extend(Mod).to_msgpack, "\xc7\x06\x00packed")
 end
 
+assert("C Packing and unpacking") do
+  assert_equal("hallo", MessagePackTest.test_unpack(MessagePackTest.test_pack))
+end
+

@@ -476,13 +476,9 @@ mrb_unpack_msgpack_obj_map(mrb_state* mrb, msgpack_object obj)
     }
 }
 
-static mrb_value
-mrb_msgpack_pack(mrb_state* mrb, mrb_value self)
+MRB_API mrb_value
+mrb_msgpack_pack(mrb_state *mrb, mrb_value object)
 {
-    mrb_value object;
-
-    mrb_get_args(mrb, "o", &object);
-
     msgpack_packer pk;
     mrb_msgpack_data data;
     data.mrb = mrb;
@@ -495,7 +491,75 @@ mrb_msgpack_pack(mrb_state* mrb, mrb_value self)
 }
 
 static mrb_value
-mrb_msgpack_unpack(mrb_state* mrb, mrb_value self)
+mrb_msgpack_pack_m(mrb_state* mrb, mrb_value self)
+{
+    mrb_value object;
+
+    mrb_get_args(mrb, "o", &object);
+
+    return mrb_msgpack_pack(mrb, object);
+}
+
+MRB_API mrb_value
+mrb_msgpack_unpack(mrb_state *mrb, mrb_value data)
+{
+    if (unlikely(!mrb->jmp)) {
+        mrb_raise(mrb, E_RUNTIME_ERROR, "not called inside a mruby function");
+    }
+
+    if (unlikely(!mrb_string_p(data))) {
+        mrb_raise(mrb, E_TYPE_ERROR, "can only unpack String data");
+    }
+
+    msgpack_unpacked result;
+    size_t off = 0;
+    msgpack_unpack_return ret;
+    mrb_value unpack_return;
+
+    msgpack_unpacked_init(&result);
+    ret = msgpack_unpack_next(&result, RSTRING_PTR(data), RSTRING_LEN(data), &off);
+    if (ret == MSGPACK_UNPACK_SUCCESS) {
+        struct mrb_jmpbuf* prev_jmp = mrb->jmp;
+        struct mrb_jmpbuf c_jmp;
+
+        MRB_TRY(&c_jmp)
+        {
+            mrb->jmp = &c_jmp;
+            unpack_return = mrb_unpack_msgpack_obj(mrb, result.data);
+            mrb->jmp = prev_jmp;
+        }
+        MRB_CATCH(&c_jmp)
+        {
+            mrb->jmp = prev_jmp;
+            msgpack_unpacked_destroy(&result);
+            MRB_THROW(mrb->jmp);
+        }
+        MRB_END_EXC(&c_jmp);
+    }
+
+    msgpack_unpacked_destroy(&result);
+
+    switch (ret) {
+        case MSGPACK_UNPACK_SUCCESS:
+            return unpack_return;
+        case MSGPACK_UNPACK_EXTRA_BYTES: //not used
+            break;
+        case MSGPACK_UNPACK_CONTINUE:
+            return mrb_fixnum_value(off);
+        case MSGPACK_UNPACK_PARSE_ERROR:
+            mrb_raise(mrb, E_MSGPACK_ERROR, "Invalid data received");
+        case MSGPACK_UNPACK_NOMEM_ERROR:
+            mrb_sys_fail(mrb, "msgpack_unpack_next");
+    }
+
+    // cannot be reached because the switch case construct above chatches all cases,
+    // but mrb_sys_fail isn't marked like mrb_raise and friends so this is needed.
+    // if this gets unlikeley returned the program crashes.
+    return mrb_undef_value();
+}
+
+static mrb_value
+mrb_msgpack_unpack_m(mrb_state* mrb, mrb_value self)
 {
     mrb_value data, block = mrb_nil_value();
 
@@ -643,12 +707,12 @@ mrb_mruby_simplemsgpack_gem_init(mrb_state* mrb)
     mrb_define_const(mrb, msgpack_mod, "_ExtPackers", mrb_hash_new(mrb));
     mrb_define_const(mrb, msgpack_mod, "_ExtUnpackers", mrb_hash_new(mrb));
 
-    mrb_define_module_function(mrb, msgpack_mod, "pack", mrb_msgpack_pack, (MRB_ARGS_REQ(1)));
-    mrb_define_module_function(mrb, msgpack_mod, "unpack", mrb_msgpack_unpack, (MRB_ARGS_REQ(1)|MRB_ARGS_BLOCK()));
+    mrb_define_module_function(mrb, msgpack_mod, "pack", mrb_msgpack_pack_m, (MRB_ARGS_REQ(1)));
+    mrb_define_module_function(mrb, msgpack_mod, "unpack", mrb_msgpack_unpack_m, (MRB_ARGS_REQ(1)|MRB_ARGS_BLOCK()));
     mrb_define_module_function(mrb, msgpack_mod, "register_pack_type", mrb_msgpack_register_pack_type, (MRB_ARGS_REQ(2)|MRB_ARGS_BLOCK()));
     mrb_define_module_function(mrb, msgpack_mod, "ext_packer_registered?", mrb_msgpack_ext_packer_registered, MRB_ARGS_REQ(1));
     mrb_define_module_function(mrb, msgpack_mod, "register_unpack_type", mrb_msgpack_register_unpack_type, (MRB_ARGS_REQ(1)|MRB_ARGS_BLOCK()));
     mrb_define_module_function(mrb, msgpack_mod, "ext_unpacker_registered?", mrb_msgpack_ext_unpacker_registered, MRB_ARGS_REQ(1));
 }
 
-void mrb_mruby_simplemsgpack_gem_final(mrb_state* mrb) { }
+void mrb_mruby_simplemsgpack_gem_final(mrb_state* mrb) {}
