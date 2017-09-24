@@ -39,16 +39,14 @@ mrb_msgpack_data_write(void* data, const char* buf, size_t len)
     }
 }
 
+#define pack_fixnum_helper_(x, pk, self) msgpack_pack_int##x(pk, mrb_fixnum(self))
+#define pack_fixnum_helper(x, pk, self) pack_fixnum_helper_(x, pk, self)
+#define mrb_msgpack_pack_int(pk, self) pack_fixnum_helper(MRB_INT_BIT, pk, self)
+
 MRB_INLINE void
 mrb_msgpack_pack_fixnum_value(mrb_state *mrb, mrb_value self, msgpack_packer* pk)
 {
-#ifdef MRB_INT16
-    int rc = msgpack_pack_int16(pk, mrb_fixnum(self));
-#elif defined(MRB_INT64)
-    int rc = msgpack_pack_int64(pk, mrb_fixnum(self));
-#else
-    int rc = msgpack_pack_int32(pk, mrb_fixnum(self));
-#endif
+    int rc = mrb_msgpack_pack_int(pk, self);
     if (unlikely(rc < 0)) {
         mrb_raise(mrb, E_MSGPACK_ERROR, "cannot pack fixnum");
     }
