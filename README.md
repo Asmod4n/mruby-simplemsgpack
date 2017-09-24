@@ -95,6 +95,11 @@ Proc, blocks or lambas
 -----------------------
 If you want to pack and unpack mruby blocks take a look at the [mruby-proc-irep-ext](https://github.com/Asmod4n/mruby-proc-irep-ext) gem, it can be registered like the other extension types
 
+Overriding `to_msgpack`
+---------------------
+It's not supported to override `to_msgpack`, `MessagePack.pack` ignores it, same when that object is included in a Hash or Array.
+This gem treats objects like ruby does, if you want to change the way your custom Class gets handled you can add `to_hash`, `to_ary`, `to_int` or `to_str` methods so it will be packed like a Hash, Array, Fixnum or String (in that order) then.
+
 Acknowledgements
 ----------------
 This is using code from https://github.com/msgpack/msgpack-c
