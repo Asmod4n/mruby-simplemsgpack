@@ -92,7 +92,7 @@ mrb_msgpack_get_ext_config(mrb_state* mrb, mrb_value obj)
     mrb_value obj_class = mrb_obj_value(mrb_obj_class(mrb, obj));
     mrb_value ext_config = mrb_hash_get(mrb, ext_packers, obj_class);
 
-    if (mrb_test(ext_config)) {
+    if (mrb_hash_p(ext_config)) {
         return ext_config;
     }
 
@@ -122,17 +122,26 @@ mrb_msgpack_pack_ext_value(mrb_state* mrb, mrb_value self, msgpack_packer* pk)
 {
     mrb_value ext_config = mrb_msgpack_get_ext_config(mrb, self);
 
-    if (mrb_nil_p(ext_config)) {
+    if (!mrb_hash_p(ext_config)) {
         return FALSE;
     }
 
-    mrb_value packed = mrb_yield(mrb, mrb_hash_get(mrb, ext_config, mrb_symbol_value(mrb_intern_lit(mrb, "packer"))), self);
+    mrb_value packer = mrb_hash_get(mrb, ext_config, mrb_symbol_value(mrb_intern_lit(mrb, "packer")));
+    if (unlikely(mrb_type(packer) != MRB_TT_PROC)) {
+        mrb_raise(mrb, E_TYPE_ERROR, "malformed packer");
+    }
 
+    mrb_value packed = mrb_yield(mrb, packer, self);
     if (unlikely(!mrb_string_p(packed))) {
         mrb_raise(mrb, E_TYPE_ERROR, "no string returned by ext type packer");
     }
 
-    int rc = msgpack_pack_ext(pk, RSTRING_LEN(packed), mrb_fixnum(mrb_hash_get(mrb, ext_config, mrb_symbol_value(mrb_intern_lit(mrb, "type")))));
+    mrb_value type = mrb_hash_get(mrb, ext_config, mrb_symbol_value(mrb_intern_lit(mrb, "type")));
+    if (unlikely(!mrb_fixnum_p(type))) {
+        mrb_raise(mrb, E_TYPE_ERROR, "malformed type");
+    }
+
+    int rc = msgpack_pack_ext(pk, RSTRING_LEN(packed), mrb_fixnum(type));
     if (likely(rc == 0))
         rc = msgpack_pack_ext_body(pk, RSTRING_PTR(packed), RSTRING_LEN(packed));
     if (unlikely(rc < 0))
@@ -427,7 +436,7 @@ mrb_unpack_msgpack_obj(mrb_state* mrb, msgpack_object obj)
             mrb_value unpacker = mrb_hash_get(mrb,
                 mrb_const_get(mrb, mrb_obj_value(mrb_module_get(mrb, "MessagePack")), mrb_intern_lit(mrb, "_ExtUnpackers")),
                 mrb_fixnum_value(obj.via.ext.type));
-            if (unlikely(mrb_type(unpacker) != MRB_TT_PROC)) {
+            if (mrb_type(unpacker) != MRB_TT_PROC) {
                 mrb_raisef(mrb, E_MSGPACK_ERROR, "Cannot unpack ext type %S", mrb_fixnum_value(obj.via.ext.type));
             }
 
@@ -629,9 +638,11 @@ mrb_msgpack_register_pack_type(mrb_state* mrb, mrb_value self)
     if (type < 0 || type > 127) {
         mrb_raise(mrb, E_RANGE_ERROR, "ext type out of range");
     }
-
-    if (mrb_type(block) != MRB_TT_PROC) {
+    if (mrb_nil_p(block)) {
         mrb_raise(mrb, E_ARGUMENT_ERROR, "no block given");
+    }
+    if (mrb_type(block) != MRB_TT_PROC) {
+        mrb_raise(mrb, E_TYPE_ERROR, "not a block");
     }
 
     ext_packers = mrb_const_get(mrb, self, mrb_intern_lit(mrb, "_ExtPackers"));
@@ -663,9 +674,11 @@ mrb_msgpack_register_unpack_type(mrb_state* mrb, mrb_value self)
     if (type < 0 || type > 127) {
         mrb_raise(mrb, E_RANGE_ERROR, "ext type out of range");
     }
-
-    if (mrb_type(block) != MRB_TT_PROC) {
+    if (mrb_nil_p(block)) {
         mrb_raise(mrb, E_ARGUMENT_ERROR, "no block given");
+    }
+    if (mrb_type(block) != MRB_TT_PROC) {
+        mrb_raise(mrb, E_TYPE_ERROR, "not a block");
     }
 
     mrb_hash_set(mrb, mrb_const_get(mrb, self, mrb_intern_lit(mrb, "_ExtUnpackers")), mrb_fixnum_value(type), block);
