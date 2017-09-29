@@ -450,6 +450,8 @@ mrb_unpack_msgpack_obj(mrb_state* mrb, msgpack_object obj)
             }
 
             return mrb_yield(mrb, unpacker, mrb_str_new(mrb, obj.via.ext.ptr, obj.via.ext.size));
+        default: // should not happen
+            mrb_raise(mrb, E_MSGPACK_ERROR, "Cannot unpack unknown message pack type");
         }
     }
 }
