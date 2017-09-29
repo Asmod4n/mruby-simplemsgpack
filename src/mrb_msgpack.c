@@ -571,9 +571,9 @@ mrb_msgpack_unpack(mrb_state *mrb, mrb_value data)
             mrb_sys_fail(mrb, "msgpack_unpack_next");
     }
 
-    // cannot be reached because the switch case construct above chatches all cases,
+    // Cannot be reached because the switch case construct above catches all cases,
     // but mrb_sys_fail isn't marked like mrb_raise and friends so this is needed.
-    // if this gets unlikeley returned the program crashes.
+    // If this gets unlikely returned the program crashes.
     return mrb_undef_value();
 }
 
