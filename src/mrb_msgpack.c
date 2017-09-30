@@ -20,7 +20,10 @@ typedef struct {
     mrb_value buffer;
 } mrb_msgpack_data;
 
-#if (__GNUC__ >= 3) || (__INTEL_COMPILER >= 800) || defined(__clang__)
+#if (defined(__has_builtin) && __has_builtin(__builtin_expect))
+#define likely(x) __builtin_expect(!!(x), 1)
+#define unlikely(x) __builtin_expect(!!(x), 0)
+#elif (__GNUC__ >= 3) || (__INTEL_COMPILER >= 800) || defined(__clang__)
 #define likely(x) __builtin_expect(!!(x), 1)
 #define unlikely(x) __builtin_expect(!!(x), 0)
 #else
@@ -526,13 +529,24 @@ mrb_msgpack_unpack(mrb_state *mrb, mrb_value data)
     msgpack_unpack_return ret;
     mrb_value unpack_return;
 
-    if (unlikely(!mrb->jmp)) {
-        mrb_raise(mrb, E_RUNTIME_ERROR, "not called inside a mruby function");
+    if (!mrb->jmp) {
+        struct mrb_jmpbuf c_jmp;
+
+        MRB_TRY(&c_jmp)
+        {
+          mrb->jmp = &c_jmp;
+          unpack_return = mrb_msgpack_unpack(mrb, data);
+          mrb->jmp = NULL;
+        }
+        MRB_CATCH(&c_jmp)
+        {
+          mrb->jmp = NULL;
+          unpack_return = mrb_obj_value(mrb->exc);
+        }
+        MRB_END_EXC(&c_jmp);
     }
 
-    if (unlikely(!mrb_string_p(data))) {
-        mrb_raise(mrb, E_TYPE_ERROR, "can only unpack String data");
-    }
+    data = mrb_str_to_str(mrb, data);
 
     off = 0;
     msgpack_unpacked_init(&result);
@@ -559,8 +573,10 @@ mrb_msgpack_unpack(mrb_state *mrb, mrb_value data)
     msgpack_unpacked_destroy(&result);
 
     switch (ret) {
-        case MSGPACK_UNPACK_SUCCESS:
+        case MSGPACK_UNPACK_SUCCESS: {
+            mrb_gc_protect(mrb, unpack_return);
             return unpack_return;
+        }
         case MSGPACK_UNPACK_EXTRA_BYTES: //not used
             break;
         case MSGPACK_UNPACK_CONTINUE:
