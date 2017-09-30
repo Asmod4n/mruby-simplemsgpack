@@ -20,10 +20,7 @@ typedef struct {
     mrb_value buffer;
 } mrb_msgpack_data;
 
-#if (defined(__has_builtin) && __has_builtin(__builtin_expect))
-#define likely(x) __builtin_expect(!!(x), 1)
-#define unlikely(x) __builtin_expect(!!(x), 0)
-#elif (__GNUC__ >= 3) || (__INTEL_COMPILER >= 800) || defined(__clang__)
+#if ((defined(__has_builtin) && __has_builtin(__builtin_expect))||(__GNUC__ >= 3) || (__INTEL_COMPILER >= 800) || defined(__clang__))
 #define likely(x) __builtin_expect(!!(x), 1)
 #define unlikely(x) __builtin_expect(!!(x), 0)
 #else
@@ -544,53 +541,54 @@ mrb_msgpack_unpack(mrb_state *mrb, mrb_value data)
           unpack_return = mrb_obj_value(mrb->exc);
         }
         MRB_END_EXC(&c_jmp);
-    }
 
-    data = mrb_str_to_str(mrb, data);
+        mrb_gc_protect(mrb, unpack_return);
+        return unpack_return;
+    } else {
+        data = mrb_str_to_str(mrb, data);
 
-    off = 0;
-    msgpack_unpacked_init(&result);
-    ret = msgpack_unpack_next(&result, RSTRING_PTR(data), RSTRING_LEN(data), &off);
-    if (ret == MSGPACK_UNPACK_SUCCESS) {
-        struct mrb_jmpbuf* prev_jmp = mrb->jmp;
-        struct mrb_jmpbuf c_jmp;
+        off = 0;
+        msgpack_unpacked_init(&result);
+        ret = msgpack_unpack_next(&result, RSTRING_PTR(data), RSTRING_LEN(data), &off);
+        if (ret == MSGPACK_UNPACK_SUCCESS) {
+            struct mrb_jmpbuf* prev_jmp = mrb->jmp;
+            struct mrb_jmpbuf c_jmp;
 
-        MRB_TRY(&c_jmp)
-        {
-            mrb->jmp = &c_jmp;
-            unpack_return = mrb_unpack_msgpack_obj(mrb, result.data);
-            mrb->jmp = prev_jmp;
+            MRB_TRY(&c_jmp)
+            {
+                mrb->jmp = &c_jmp;
+                unpack_return = mrb_unpack_msgpack_obj(mrb, result.data);
+                mrb->jmp = prev_jmp;
+            }
+            MRB_CATCH(&c_jmp)
+            {
+                mrb->jmp = prev_jmp;
+                msgpack_unpacked_destroy(&result);
+                MRB_THROW(mrb->jmp);
+            }
+            MRB_END_EXC(&c_jmp);
         }
-        MRB_CATCH(&c_jmp)
-        {
-            mrb->jmp = prev_jmp;
-            msgpack_unpacked_destroy(&result);
-            MRB_THROW(mrb->jmp);
+
+        msgpack_unpacked_destroy(&result);
+
+        switch (ret) {
+            case MSGPACK_UNPACK_SUCCESS:
+                return unpack_return;
+            case MSGPACK_UNPACK_EXTRA_BYTES: //not used
+                break;
+            case MSGPACK_UNPACK_CONTINUE:
+                return mrb_fixnum_value(off);
+            case MSGPACK_UNPACK_PARSE_ERROR:
+                mrb_raise(mrb, E_MSGPACK_ERROR, "Invalid data received");
+            case MSGPACK_UNPACK_NOMEM_ERROR:
+                mrb_sys_fail(mrb, "msgpack_unpack_next");
         }
-        MRB_END_EXC(&c_jmp);
+
+        // Cannot be reached because the switch case construct above catches all cases,
+        // but mrb_sys_fail isn't marked like mrb_raise and friends so this is needed.
+        // If this gets unlikely returned the program crashes.
+        return mrb_undef_value();
     }
-
-    msgpack_unpacked_destroy(&result);
-
-    switch (ret) {
-        case MSGPACK_UNPACK_SUCCESS: {
-            mrb_gc_protect(mrb, unpack_return);
-            return unpack_return;
-        }
-        case MSGPACK_UNPACK_EXTRA_BYTES: //not used
-            break;
-        case MSGPACK_UNPACK_CONTINUE:
-            return mrb_fixnum_value(off);
-        case MSGPACK_UNPACK_PARSE_ERROR:
-            mrb_raise(mrb, E_MSGPACK_ERROR, "Invalid data received");
-        case MSGPACK_UNPACK_NOMEM_ERROR:
-            mrb_sys_fail(mrb, "msgpack_unpack_next");
-    }
-
-    // Cannot be reached because the switch case construct above catches all cases,
-    // but mrb_sys_fail isn't marked like mrb_raise and friends so this is needed.
-    // If this gets unlikely returned the program crashes.
-    return mrb_undef_value();
 }
 
 static mrb_value
