@@ -1,6 +1,6 @@
 #include <msgpack.h>
 #if (MSGPACK_VERSION_MAJOR < 1)
- #error "mrb-simplemsgpack needs at least msgpack-c 1"
+ #error "mruby-simplemsgpack needs at least msgpack-c 1"
 #endif
 #include <mruby.h>
 #include <mruby/array.h>
@@ -52,6 +52,7 @@ mrb_msgpack_pack_fixnum_value(mrb_state *mrb, mrb_value self, msgpack_packer* pk
     }
 }
 
+#ifndef MRB_WITHOUT_FLOAT
 MRB_INLINE void
 mrb_msgpack_pack_float_value(mrb_state *mrb, mrb_value self, msgpack_packer* pk)
 {
@@ -64,6 +65,7 @@ mrb_msgpack_pack_float_value(mrb_state *mrb, mrb_value self, msgpack_packer* pk)
         mrb_raise(mrb, E_MSGPACK_ERROR, "cannot pack float");
     }
 }
+#endif
 
 MRB_INLINE void
 mrb_msgpack_pack_string_value(mrb_state *mrb, mrb_value self, msgpack_packer* pk)
@@ -124,33 +126,42 @@ static mrb_bool
 mrb_msgpack_pack_ext_value(mrb_state* mrb, mrb_value self, msgpack_packer* pk)
 {
     mrb_value ext_config, packer, packed, type;
-    int rc;
+    int arena_index, rc;
+    arena_index = mrb_gc_arena_save(mrb);
 
     ext_config = mrb_msgpack_get_ext_config(mrb, self);
     if (!mrb_hash_p(ext_config)) {
+        mrb_gc_arena_restore(mrb, arena_index);
         return FALSE;
     }
 
     packer = mrb_hash_get(mrb, ext_config, mrb_symbol_value(mrb_intern_lit(mrb, "packer")));
     if (unlikely(mrb_type(packer) != MRB_TT_PROC)) {
+        mrb_gc_arena_restore(mrb, arena_index);
         mrb_raise(mrb, E_TYPE_ERROR, "malformed packer");
     }
 
     packed = mrb_yield(mrb, packer, self);
     if (unlikely(!mrb_string_p(packed))) {
+        mrb_gc_arena_restore(mrb, arena_index);
         mrb_raise(mrb, E_TYPE_ERROR, "no string returned by ext type packer");
     }
 
     type = mrb_hash_get(mrb, ext_config, mrb_symbol_value(mrb_intern_lit(mrb, "type")));
     if (unlikely(!mrb_fixnum_p(type))) {
+        mrb_gc_arena_restore(mrb, arena_index);
         mrb_raise(mrb, E_TYPE_ERROR, "malformed type");
     }
 
     rc = msgpack_pack_ext(pk, RSTRING_LEN(packed), mrb_fixnum(type));
     if (likely(rc == 0))
         rc = msgpack_pack_ext_body(pk, RSTRING_PTR(packed), RSTRING_LEN(packed));
-    if (unlikely(rc < 0))
+    if (unlikely(rc < 0)) {
+        mrb_gc_arena_restore(mrb, arena_index);
         mrb_raise(mrb, E_MSGPACK_ERROR, "cannot pack object");
+    }
+
+    mrb_gc_arena_restore(mrb, arena_index);
 
     return TRUE;
 }
@@ -179,9 +190,11 @@ mrb_msgpack_pack_value(mrb_state* mrb, mrb_value self, msgpack_packer* pk)
         case MRB_TT_FIXNUM:
             mrb_msgpack_pack_fixnum_value(mrb, self, pk);
             break;
+#ifndef MRB_WITHOUT_FLOAT
         case MRB_TT_FLOAT:
             mrb_msgpack_pack_float_value(mrb, self, pk);
             break;
+#endif
         case MRB_TT_ARRAY:
             mrb_msgpack_pack_array_value(mrb, self, pk);
             break;
@@ -243,6 +256,7 @@ mrb_msgpack_pack_hash_value(mrb_state* mrb, mrb_value self, msgpack_packer* pk)
     mrb_value keys = mrb_hash_keys(mrb, self);
     int rc = msgpack_pack_map(pk, RARRAY_LEN(keys));
     if (unlikely(rc < 0)) {
+        mrb_gc_arena_restore(mrb, arena_index);
         mrb_raise(mrb, E_MSGPACK_ERROR, "cannot pack hash");
     }
     for (mrb_int hash_pos = 0; hash_pos < RARRAY_LEN(keys); hash_pos++) {
@@ -309,6 +323,7 @@ mrb_msgpack_pack_hash(mrb_state* mrb, mrb_value self)
     return data.buffer;
 }
 
+#ifndef MRB_WITHOUT_FLOAT
 static mrb_value
 mrb_msgpack_pack_float(mrb_state* mrb, mrb_value self)
 {
@@ -322,6 +337,7 @@ mrb_msgpack_pack_float(mrb_state* mrb, mrb_value self)
 
     return data.buffer;
 }
+#endif
 
 static mrb_value
 mrb_msgpack_pack_fixnum(mrb_state* mrb, mrb_value self)
@@ -420,6 +436,7 @@ mrb_unpack_msgpack_obj(mrb_state* mrb, msgpack_object obj)
             }
             return mrb_float_value(mrb, obj.via.i64);
         }
+#ifndef MRB_WITHOUT_FLOAT
 #if (((MSGPACK_VERSION_MAJOR == 2) && (MSGPACK_VERSION_MINOR >= 1)) || (MSGPACK_VERSION_MAJOR > 2))
         case MSGPACK_OBJECT_FLOAT32:
             return mrb_float_value(mrb, obj.via.f64);
@@ -432,6 +449,7 @@ mrb_unpack_msgpack_obj(mrb_state* mrb, msgpack_object obj)
 #else
         case MSGPACK_OBJECT_FLOAT:
             return mrb_float_value(mrb, obj.via.f64);
+#endif
 #endif
         case MSGPACK_OBJECT_STR:
             return mrb_str_new(mrb, obj.via.str.ptr, obj.via.str.size);
@@ -521,9 +539,6 @@ mrb_msgpack_pack_m(mrb_state* mrb, mrb_value self)
 MRB_API mrb_value
 mrb_msgpack_unpack(mrb_state *mrb, mrb_value data)
 {
-    msgpack_unpacked result;
-    size_t off;
-    msgpack_unpack_return ret;
     mrb_value unpack_return;
 
     if (!mrb->jmp) {
@@ -545,6 +560,9 @@ mrb_msgpack_unpack(mrb_state *mrb, mrb_value data)
         mrb_gc_protect(mrb, unpack_return);
         return unpack_return;
     } else {
+        size_t off;
+        msgpack_unpacked result;
+        msgpack_unpack_return ret;
         data = mrb_str_to_str(mrb, data);
 
         off = 0;
@@ -732,7 +750,9 @@ mrb_mruby_simplemsgpack_gem_init(mrb_state* mrb)
     mrb_define_method(mrb, mrb->string_class, "to_msgpack", mrb_msgpack_pack_string, MRB_ARGS_NONE());
     mrb_define_method(mrb, mrb->array_class, "to_msgpack", mrb_msgpack_pack_array, MRB_ARGS_NONE());
     mrb_define_method(mrb, mrb->hash_class, "to_msgpack", mrb_msgpack_pack_hash, MRB_ARGS_NONE());
+#ifndef MRB_WITHOUT_FLOAT
     mrb_define_method(mrb, mrb->float_class, "to_msgpack", mrb_msgpack_pack_float, MRB_ARGS_NONE());
+#endif
     mrb_define_method(mrb, mrb->fixnum_class, "to_msgpack", mrb_msgpack_pack_fixnum, MRB_ARGS_NONE());
     mrb_define_method(mrb, mrb->true_class, "to_msgpack", mrb_msgpack_pack_true, MRB_ARGS_NONE());
     mrb_define_method(mrb, mrb->false_class, "to_msgpack", mrb_msgpack_pack_false, MRB_ARGS_NONE());

@@ -25,17 +25,19 @@ assert("Integer#to_msgpack") do
   end
 end
 
-assert("Float#to_msgpack") do
-  neg_floats = [-1.7976931348623157e+308, Mrbtest::FIXNUM_MIN-1, -1.0, -2.2250738585072014e-308]
-  pos_floats = [2.2250738585072014e-308, 1.0, Mrbtest::FIXNUM_MAX+1, 1.7976931348623157e+308]
-  [*neg_floats, 0.0, *pos_floats].each do |float|
-    expected = float
+if Object.const_defined? "Float"
+  assert("Float#to_msgpack") do
+    neg_floats = [-1.7976931348623157e+308, Mrbtest::FIXNUM_MIN-1, -1.0, -2.2250738585072014e-308]
+    pos_floats = [2.2250738585072014e-308, 1.0, Mrbtest::FIXNUM_MAX+1, 1.7976931348623157e+308]
+    [*neg_floats, 0.0, *pos_floats].each do |float|
+      expected = float
 
-    actual = MessagePack.unpack(float.to_msgpack)
-    assert_true actual.equal?(expected), "Expected identity", assertion_diff(expected, actual)
+      actual = MessagePack.unpack(float.to_msgpack)
+      assert_true actual.equal?(expected), "Expected identity", assertion_diff(expected, actual)
 
-    actual = MessagePack.unpack(MessagePack.pack(float))
-    assert_true actual.equal?(expected), "Expected identity", assertion_diff(expected, actual)
+      actual = MessagePack.unpack(MessagePack.pack(float))
+      assert_true actual.equal?(expected), "Expected identity", assertion_diff(expected, actual)
+    end
   end
 end
 
@@ -51,13 +53,19 @@ assert("Symbol#to_msgpack") do
 end
 
 assert("Array#to_msgpack") do
-  array = [nil, false, true, 1, -1, 1.2, "string", [], {}]
+  array = [nil, false, true, 1, -1, "string", [], {}]
+  if Object.const_defined? "Float"
+    array << 1.1
+  end
   assert_equal(array, MessagePack.unpack(array.to_msgpack))
   assert_equal(array, MessagePack.unpack(MessagePack.pack(array)))
 end
 
 assert("Hash#to_msgpack") do
-  hash = { nil => nil, false => false, true => true, 1 => 1, 1.2 => 1.2, "string" => "string", [] => [], {} => {} }
+  hash = { nil => nil, false => false, true => true, 1 => 1, "string" => "string", [] => [], {} => {} }
+  if Object.const_defined? "Float"
+    hash[1.1] = 1.1
+  end
   assert_equal(hash, MessagePack.unpack(hash.to_msgpack))
   assert_equal(hash, MessagePack.unpack(MessagePack.pack(hash)))
 end
