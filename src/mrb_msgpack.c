@@ -426,15 +426,25 @@ mrb_unpack_msgpack_obj(mrb_state* mrb, msgpack_object obj)
             return mrb_bool_value(obj.via.boolean);
         case MSGPACK_OBJECT_POSITIVE_INTEGER: {
             if (POSFIXABLE(obj.via.u64)) {
-              return mrb_fixnum_value(obj.via.u64);
+                return mrb_fixnum_value(obj.via.u64);
+            } else {
+#ifndef MRB_WITHOUT_FLOAT
+                return mrb_float_value(mrb, obj.via.u64);
+#else
+                mrb_raise(mrb, E_RANGE_ERROR, "Positive integer too big for Fixnum");
+#endif
             }
-            return mrb_float_value(mrb, obj.via.u64);
         }
         case MSGPACK_OBJECT_NEGATIVE_INTEGER: {
             if (NEGFIXABLE(obj.via.i64)) {
               return mrb_fixnum_value(obj.via.i64);
+            } else {
+#ifndef MRB_WITHOUT_FLOAT
+                return mrb_float_value(mrb, obj.via.i64);
+#else
+                mrb_raise(mrb, E_RANGE_ERROR, "Negative integer too big for Fixnum");
+#endif
             }
-            return mrb_float_value(mrb, obj.via.i64);
         }
 #ifndef MRB_WITHOUT_FLOAT
 #if (((MSGPACK_VERSION_MAJOR == 2) && (MSGPACK_VERSION_MINOR >= 1)) || (MSGPACK_VERSION_MAJOR > 2))
@@ -469,7 +479,7 @@ mrb_unpack_msgpack_obj(mrb_state* mrb, msgpack_object obj)
 
             return mrb_yield(mrb, unpacker, mrb_str_new(mrb, obj.via.ext.ptr, obj.via.ext.size));
         default: // should not happen
-            mrb_raise(mrb, E_MSGPACK_ERROR, "Cannot unpack unknown message pack type");
+            mrb_raise(mrb, E_MSGPACK_ERROR, "Cannot unpack unknown msgpack type");
         }
     }
 }
@@ -744,7 +754,7 @@ void
 mrb_mruby_simplemsgpack_gem_init(mrb_state* mrb)
 {
     struct RClass* msgpack_mod;
-    static const char *mrb_msgpack_version;
+    static const char *mrb_msgpack_version = MSGPACK_VERSION;
 
     mrb_define_method(mrb, mrb->object_class, "to_msgpack", mrb_msgpack_pack_object, MRB_ARGS_NONE());
     mrb_define_method(mrb, mrb->string_class, "to_msgpack", mrb_msgpack_pack_string, MRB_ARGS_NONE());
@@ -761,12 +771,11 @@ mrb_mruby_simplemsgpack_gem_init(mrb_state* mrb)
     msgpack_mod = mrb_define_module(mrb, "MessagePack");
     mrb_define_class_under(mrb, msgpack_mod, "Error", E_RUNTIME_ERROR);
 
-    mrb_msgpack_version = MSGPACK_VERSION;
     mrb_define_const(mrb, msgpack_mod, "Version", mrb_str_new_static(mrb, mrb_msgpack_version, strlen(mrb_msgpack_version)));
     mrb_define_const(mrb, msgpack_mod, "_ExtPackers", mrb_hash_new(mrb));
     mrb_define_const(mrb, msgpack_mod, "_ExtUnpackers", mrb_hash_new(mrb));
 
-    mrb_define_module_function(mrb, msgpack_mod, "pack", mrb_msgpack_pack_m, (MRB_ARGS_REQ(1)));
+    mrb_define_module_function(mrb, msgpack_mod, "pack", mrb_msgpack_pack_m, MRB_ARGS_REQ(1));
     mrb_define_module_function(mrb, msgpack_mod, "unpack", mrb_msgpack_unpack_m, (MRB_ARGS_REQ(1)|MRB_ARGS_BLOCK()));
     mrb_define_module_function(mrb, msgpack_mod, "register_pack_type", mrb_msgpack_register_pack_type, (MRB_ARGS_REQ(2)|MRB_ARGS_BLOCK()));
     mrb_define_module_function(mrb, msgpack_mod, "ext_packer_registered?", mrb_msgpack_ext_packer_registered, MRB_ARGS_REQ(1));
