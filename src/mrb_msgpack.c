@@ -490,8 +490,7 @@ mrb_unpack_msgpack_obj_array(mrb_state* mrb, msgpack_object obj)
     if (obj.via.array.size != 0) {
         mrb_value unpacked_array = mrb_ary_new_capa(mrb, obj.via.array.size);
         int arena_index = mrb_gc_arena_save(mrb);
-        uint32_t array_pos;
-        for (array_pos = 0; array_pos < obj.via.array.size; array_pos++) {
+        for (uint32_t array_pos = 0; array_pos < obj.via.array.size; array_pos++) {
             mrb_ary_push(mrb, unpacked_array, mrb_unpack_msgpack_obj(mrb, obj.via.array.ptr[array_pos]));
             mrb_gc_arena_restore(mrb, arena_index);
         }
@@ -508,8 +507,7 @@ mrb_unpack_msgpack_obj_map(mrb_state* mrb, msgpack_object obj)
     if (obj.via.map.size != 0) {
         mrb_value unpacked_hash = mrb_hash_new_capa(mrb, obj.via.map.size);
         int arena_index = mrb_gc_arena_save(mrb);
-        uint32_t map_pos;
-        for (map_pos = 0; map_pos < obj.via.map.size; map_pos++) {
+        for (uint32_t map_pos = 0; map_pos < obj.via.map.size; map_pos++) {
             mrb_hash_set(mrb, unpacked_hash,
                 mrb_unpack_msgpack_obj(mrb, obj.via.map.ptr[map_pos].key),
                 mrb_unpack_msgpack_obj(mrb, obj.via.map.ptr[map_pos].val));
@@ -532,6 +530,26 @@ mrb_msgpack_pack(mrb_state *mrb, mrb_value object)
     msgpack_packer_init(&pk, &data, mrb_msgpack_data_write);
 
     mrb_msgpack_pack_value(mrb, object, &pk);
+
+    return data.buffer;
+}
+
+MRB_API mrb_value
+mrb_msgpack_pack_argv(mrb_state *mrb, mrb_value *argv, mrb_int argv_len)
+{
+    msgpack_packer pk;
+    mrb_msgpack_data data;
+    data.mrb = mrb;
+    data.buffer = mrb_str_new(mrb, NULL, 0);
+    msgpack_packer_init(&pk, &data, mrb_msgpack_data_write);
+
+    int rc = msgpack_pack_array(&pk, argv_len);
+    if (unlikely(rc < 0)) {
+        mrb_raise(mrb, E_MSGPACK_ERROR, "cannot pack array");
+    }
+    for (mrb_int ary_pos = 0; ary_pos < argv_len; ary_pos++) {
+        mrb_msgpack_pack_value(mrb, argv[ary_pos], &pk);
+    }
 
     return data.buffer;
 }
