@@ -39,12 +39,12 @@ mrb_msgpack_data_write(void* data, const char* buf, size_t len)
     }
 }
 
-#define pack_fixnum_helper_(x, pk, self) msgpack_pack_int##x(pk, mrb_fixnum(self))
-#define pack_fixnum_helper(x, pk, self) pack_fixnum_helper_(x, pk, self)
-#define mrb_msgpack_pack_int(pk, self) pack_fixnum_helper(MRB_INT_BIT, pk, self)
+#define pack_integer_helper_(x, pk, self) msgpack_pack_int##x(pk, mrb_fixnum(self))
+#define pack_integer_helper(x, pk, self) pack_integer_helper_(x, pk, self)
+#define mrb_msgpack_pack_int(pk, self) pack_integer_helper(MRB_INT_BIT, pk, self)
 
 MRB_INLINE void
-mrb_msgpack_pack_fixnum_value(mrb_state *mrb, mrb_value self, msgpack_packer* pk)
+mrb_msgpack_pack_integer_value(mrb_state *mrb, mrb_value self, msgpack_packer* pk)
 {
     int rc = mrb_msgpack_pack_int(pk, self);
     if (unlikely(rc < 0)) {
@@ -188,7 +188,7 @@ mrb_msgpack_pack_value(mrb_state* mrb, mrb_value self, msgpack_packer* pk)
             rc = msgpack_pack_true(pk);
             break;
         case MRB_TT_FIXNUM:
-            mrb_msgpack_pack_fixnum_value(mrb, self, pk);
+            mrb_msgpack_pack_integer_value(mrb, self, pk);
             break;
 #ifndef MRB_WITHOUT_FLOAT
         case MRB_TT_FLOAT:
@@ -217,7 +217,7 @@ mrb_msgpack_pack_value(mrb_state* mrb, mrb_value self, msgpack_packer* pk)
                     } else {
                         try_convert = mrb_check_convert_type(mrb, self, MRB_TT_FIXNUM, "Fixnum", "to_int");
                         if (mrb_fixnum_p(try_convert)) {
-                            mrb_msgpack_pack_fixnum_value(mrb, try_convert, pk);
+                            mrb_msgpack_pack_integer_value(mrb, try_convert, pk);
                         } else {
                             try_convert = mrb_check_convert_type(mrb, self, MRB_TT_STRING, "String", "to_str");
                             if (mrb_string_p(try_convert)) {
@@ -340,7 +340,7 @@ mrb_msgpack_pack_float(mrb_state* mrb, mrb_value self)
 #endif
 
 static mrb_value
-mrb_msgpack_pack_fixnum(mrb_state* mrb, mrb_value self)
+mrb_msgpack_pack_integer(mrb_state* mrb, mrb_value self)
 {
     msgpack_packer pk;
     mrb_msgpack_data data;
@@ -348,7 +348,7 @@ mrb_msgpack_pack_fixnum(mrb_state* mrb, mrb_value self)
     data.buffer = mrb_str_new(mrb, NULL, 0);
     msgpack_packer_init(&pk, &data, mrb_msgpack_data_write);
 
-    mrb_msgpack_pack_fixnum_value(mrb, self, &pk);
+    mrb_msgpack_pack_integer_value(mrb, self, &pk);
 
     return data.buffer;
 }
@@ -781,7 +781,12 @@ mrb_mruby_simplemsgpack_gem_init(mrb_state* mrb)
 #ifndef MRB_WITHOUT_FLOAT
     mrb_define_method(mrb, mrb->float_class, "to_msgpack", mrb_msgpack_pack_float, MRB_ARGS_NONE());
 #endif
-    mrb_define_method(mrb, mrb->fixnum_class, "to_msgpack", mrb_msgpack_pack_fixnum, MRB_ARGS_NONE());
+
+#if (MRUBY_RELEASE_MAJOR < 3)
+    mrb_define_method(mrb, mrb->fixnum_class, "to_msgpack", mrb_msgpack_pack_integer, MRB_ARGS_NONE());
+#else
+    mrb_define_method(mrb, mrb->integer_class, "to_msgpack", mrb_msgpack_pack_integer, MRB_ARGS_NONE());
+#endif
     mrb_define_method(mrb, mrb->true_class, "to_msgpack", mrb_msgpack_pack_true, MRB_ARGS_NONE());
     mrb_define_method(mrb, mrb->false_class, "to_msgpack", mrb_msgpack_pack_false, MRB_ARGS_NONE());
     mrb_define_method(mrb, mrb->nil_class, "to_msgpack", mrb_msgpack_pack_nil, MRB_ARGS_NONE());
