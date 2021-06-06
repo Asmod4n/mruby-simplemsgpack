@@ -1,4 +1,4 @@
-[![Build Status](https://travis-ci.org/Asmod4n/mruby-simplemsgpack.svg?branch=master)](https://travis-ci.org/Asmod4n/mruby-simplemsgpack)
+[![Build Status](https://travis-ci.com/Asmod4n/mruby-simplemsgpack.svg?branch=master)](https://travis-ci.com/Asmod4n/mruby-simplemsgpack)
 
 mruby-simplemsgpack
 ===================
