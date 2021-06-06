@@ -3,6 +3,10 @@
 mruby-simplemsgpack
 ===================
 
+Breaking changes
+================
+Starting with Release 2.0 only mruby-3 is supported, if you are on an older version check out a commit from before 2021.
+
 Installation
 ============
 First get a working copy of [mruby](https://github.com/mruby/mruby) then add
@@ -11,8 +15,10 @@ First get a working copy of [mruby](https://github.com/mruby/mruby) then add
 ```
 to the build_conf.rb of the mruby directory
 
-mruby-simplemsgpack searches for msgpack-c on your system, if it can find it it links against it, there is also a bundled version of msgpack-c included if you don't have it installed in your system.
-You need at least msgpack-c 1.
+mruby-simplemsgpack searches for msgpack-c on your system, if it can find it it links against it, otherwise it builds against msgpack-c from source.
+You need at least msgpack-c 1 and depending on your system also pkg-config.
+
+For building from source you need to have cmake installed on your system, take a look at https://github.com/msgpack/msgpack-c/blob/c_master/QUICKSTART-C.md#install-with-source-code for more information.
 
 Example
 -------
@@ -47,17 +53,17 @@ unpacked # => ['bye', { a: 'hash', with: [1, 'embedded', 'array'] }]
 ```
 
 When using `MessagePack.unpack` with a block and passing it a incomplete packed Message
-it returns the number of bytes it was able to unpack, if it was able to unpack the howl Message it returns self.
+it returns the position of the first offending byte, if it was able to unpack the whole Message it returns self.
 This is helpful if the given data contains an incomplete
 last object and we want to continue unpacking after we have more data.
 
 ```ruby
 packed = packed_string + packed_hash.slice(0, packed_hash.length/2)
 unpacked = []
-unpacked_length = MessagePack.unpack(packed) do |result|
+offending_byte = MessagePack.unpack(packed) do |result|
   unpacked << result
 end
-unpacked_length # => 4 (length of packed_string)
+offending_byte # => 19 (length of packed)
 unpacked # => ['bye']
 ```
 
