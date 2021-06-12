@@ -546,79 +546,6 @@ mrb_msgpack_pack_m(mrb_state* mrb, mrb_value self)
     return mrb_msgpack_pack(mrb, object);
 }
 
-MRB_API mrb_value
-mrb_msgpack_unpack(mrb_state *mrb, mrb_value data)
-{
-    mrb_value unpack_return;
-
-    if (!mrb->jmp) {
-        struct mrb_jmpbuf c_jmp;
-
-        MRB_TRY(&c_jmp)
-        {
-          mrb->jmp = &c_jmp;
-          unpack_return = mrb_msgpack_unpack(mrb, data);
-          mrb->jmp = NULL;
-        }
-        MRB_CATCH(&c_jmp)
-        {
-          mrb->jmp = NULL;
-          unpack_return = mrb_obj_value(mrb->exc);
-        }
-        MRB_END_EXC(&c_jmp);
-
-        mrb_gc_protect(mrb, unpack_return);
-        return unpack_return;
-    } else {
-        size_t off;
-        msgpack_unpacked result;
-        msgpack_unpack_return ret;
-        data = mrb_str_to_str(mrb, data);
-
-        off = 0;
-        msgpack_unpacked_init(&result);
-        ret = msgpack_unpack_next(&result, RSTRING_PTR(data), RSTRING_LEN(data), &off);
-        if (ret == MSGPACK_UNPACK_SUCCESS) {
-            struct mrb_jmpbuf* prev_jmp = mrb->jmp;
-            struct mrb_jmpbuf c_jmp;
-
-            MRB_TRY(&c_jmp)
-            {
-                mrb->jmp = &c_jmp;
-                unpack_return = mrb_unpack_msgpack_obj(mrb, result.data);
-                mrb->jmp = prev_jmp;
-            }
-            MRB_CATCH(&c_jmp)
-            {
-                mrb->jmp = prev_jmp;
-                msgpack_unpacked_destroy(&result);
-                MRB_THROW(mrb->jmp);
-            }
-            MRB_END_EXC(&c_jmp);
-        }
-
-        msgpack_unpacked_destroy(&result);
-
-        switch (ret) {
-            case MSGPACK_UNPACK_SUCCESS:
-                return unpack_return;
-            case MSGPACK_UNPACK_EXTRA_BYTES: //not used
-                break;
-            case MSGPACK_UNPACK_CONTINUE:
-                return mrb_int_value(mrb, off);
-            case MSGPACK_UNPACK_PARSE_ERROR:
-                mrb_raise(mrb, E_MSGPACK_ERROR, "Invalid data received");
-            case MSGPACK_UNPACK_NOMEM_ERROR:
-                mrb_sys_fail(mrb, "msgpack_unpack_next");
-        }
-
-        // Cannot be reached because the switch case construct above catches all cases,
-        // but mrb_sys_fail isn't marked like mrb_raise and friends so this is needed.
-        // If this gets unlikely returned the program crashes.
-        return mrb_undef_value();
-    }
-}
-
 typedef struct {
     mrb_value self;
     char *str;
@@ -683,6 +610,16 @@ mrb_msgpack_unpack_m_ensure(mrb_state *mrb, mrb_value self_data_block_result)
     return mrb_nil_value();
 }
 
+MRB_API mrb_value
+mrb_msgpack_unpack(mrb_state *mrb, mrb_value data)
+{
+    msgpack_unpacked result;
+    mrb_msgpack_unpack_m_cb_data cb_data = {data, RSTRING_PTR(data), RSTRING_LEN(data), mrb_nil_value(), &result};
+    mrb_value cb_data_cptr = mrb_cptr_value(mrb, &cb_data);
+    mrb_value unpack_return = mrb_ensure(mrb, mrb_msgpack_unpack_m_cb, cb_data_cptr, mrb_msgpack_unpack_m_ensure, cb_data_cptr);
+    mrb_gc_protect(mrb, unpack_return);
+    return unpack_return;
+}
 
 static mrb_value
 mrb_msgpack_unpack_m(mrb_state* mrb, mrb_value self)

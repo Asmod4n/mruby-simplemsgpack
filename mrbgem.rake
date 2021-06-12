@@ -7,6 +7,7 @@ MRuby::Gem::Specification.new('mruby-simplemsgpack') do |spec|
   spec.authors = File.readlines("#{spec.dir}/AUTHORS").map(&:strip)
   spec.version = MessagePack::VERSION
   spec.add_dependency 'mruby-errno'
+  spec.add_dependency 'mruby-error'
   spec.add_conflict 'mruby-msgpack'
 
   if build.is_a?(MRuby::CrossBuild)  
