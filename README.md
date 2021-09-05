@@ -5,20 +5,24 @@ mruby-simplemsgpack
 
 Breaking changes
 ================
+
 Starting with Release 2.0 only mruby-3 is supported, if you are on an older version check out a commit from before 2021.
 
 Installation
 ============
+
 First get a working copy of [mruby](https://github.com/mruby/mruby) then add
+
 ```ruby
   conf.gem mgem: 'mruby-simplemsgpack'
 ```
+
 to the build_conf.rb of the mruby directory
 
 mruby-simplemsgpack searches for msgpack-c on your system, if it can find it it links against it, otherwise it builds against msgpack-c from source.
 You need at least msgpack-c 1 and depending on your system also pkg-config.
 
-For building from source you need to have cmake installed on your system, take a look at https://github.com/msgpack/msgpack-c/blob/c_master/QUICKSTART-C.md#install-with-source-code for more information.
+For building from source you need to have cmake installed on your system, take a look at <https://github.com/msgpack/msgpack-c/blob/c_master/QUICKSTART-C.md#install-with-source-code> for more information.
 
 Example
 -------
@@ -93,22 +97,25 @@ MessagePack.register_unpack_type(cls_ext_type) { |data| data.constantize }
 MessagePack.unpack(Object.to_msgpack) # => Object
 ```
 
-For nil, true, false, Fixnum, Float, String, Array and Hash a registered
+For nil, true, false, Integer, Float, String, Array and Hash a registered
 ext type is ignored. They are always packed according to the [MessagePack
 specification](https://github.com/msgpack/msgpack/blob/master/spec.md).
 
 Proc, blocks or lambas
 -----------------------
+
 If you want to pack and unpack mruby blocks take a look at the [mruby-proc-irep-ext](https://github.com/Asmod4n/mruby-proc-irep-ext) gem, it can be registered like the other extension types
 
 Overriding `to_msgpack`
 ---------------------
+
 It's not supported to override `to_msgpack`, `MessagePack.pack` ignores it, same when that object is included in a Hash or Array.
-This gem treats objects like ruby does, if you want to change the way your custom Class gets handled you can add `to_hash`, `to_ary`, `to_int` or `to_str` methods so it will be packed like a Hash, Array, Fixnum or String (in that order) then.
+This gem treats objects like ruby does, if you want to change the way your custom Class gets handled you can add `to_hash`, `to_ary`, `to_int` or `to_str` methods so it will be packed like a Hash, Array, Integer or String (in that order) then.
 
 Acknowledgements
 ----------------
-This is using code from https://github.com/msgpack/msgpack-c
+
+This is using code from <https://github.com/msgpack/msgpack-c>
 
 Copyright (C) 2008-2015 FURUHASHI Sadayuki
 

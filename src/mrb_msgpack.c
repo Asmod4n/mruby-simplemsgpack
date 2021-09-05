@@ -455,11 +455,11 @@ mrb_unpack_msgpack_obj(mrb_state* mrb, msgpack_object obj)
             mrb_value unpacker = mrb_hash_get(mrb,
                 mrb_const_get(mrb, mrb_obj_value(mrb_module_get(mrb, "MessagePack")), mrb_intern_lit(mrb, "_ExtUnpackers")),
                 mrb_int_value(mrb, obj.via.ext.type));
-            if (mrb_type(unpacker) != MRB_TT_PROC) {
+            if (mrb_type(unpacker) == MRB_TT_PROC) {
+                return mrb_yield(mrb, unpacker, mrb_str_new(mrb, obj.via.ext.ptr, obj.via.ext.size));
+            } else {
                 mrb_raisef(mrb, E_MSGPACK_ERROR, "Cannot unpack ext type %S", mrb_int_value(mrb, obj.via.ext.type));
             }
-
-            return mrb_yield(mrb, unpacker, mrb_str_new(mrb, obj.via.ext.ptr, obj.via.ext.size));
         default: // should not happen
             mrb_raise(mrb, E_MSGPACK_ERROR, "Cannot unpack unknown msgpack type");
         }
@@ -712,7 +712,6 @@ void
 mrb_mruby_simplemsgpack_gem_init(mrb_state* mrb)
 {
     struct RClass* msgpack_mod;
-    static const char *mrb_msgpack_version = MSGPACK_VERSION;
 
     mrb_define_method(mrb, mrb->object_class, "to_msgpack", mrb_msgpack_pack_object, MRB_ARGS_NONE());
     mrb_define_method(mrb, mrb->string_class, "to_msgpack", mrb_msgpack_pack_string, MRB_ARGS_NONE());
@@ -729,7 +728,7 @@ mrb_mruby_simplemsgpack_gem_init(mrb_state* mrb)
     msgpack_mod = mrb_define_module(mrb, "MessagePack");
     mrb_define_class_under(mrb, msgpack_mod, "Error", E_RUNTIME_ERROR);
 
-    mrb_define_const(mrb, msgpack_mod, "LibMsgPackCVersion", mrb_str_new_static(mrb, mrb_msgpack_version, strlen(mrb_msgpack_version)));
+    mrb_define_const(mrb, msgpack_mod, "LibMsgPackCVersion", mrb_str_new_lit(mrb, MSGPACK_VERSION));
     mrb_define_const(mrb, msgpack_mod, "_ExtPackers", mrb_hash_new(mrb));
     mrb_define_const(mrb, msgpack_mod, "_ExtUnpackers", mrb_hash_new(mrb));
 
