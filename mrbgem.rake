@@ -11,7 +11,7 @@ MRuby::Gem::Specification.new('mruby-simplemsgpack') do |spec|
   spec.add_conflict 'mruby-msgpack'
 
   if build.is_a?(MRuby::CrossBuild)  
-    unless File.exists?("#{spec.build_dir}/lib/libmsgpackc.a")
+    unless File.exist?("#{spec.build_dir}/lib/libmsgpackc.a")
       cmake_opts = "-DCMAKE_SYSTEM_NAME=\"#{build.build_target}\" -DCMAKE_HOST_SYSTEM_NAME=\"#{build.host_target}\" -DCMAKE_INSTALL_PREFIX=\"#{spec.build_dir}\" -DCMAKE_CXX_COMPILER=\"#{spec.cxx.command}\" -DCMAKE_CXX_COMPILER_AR=\"#{spec.archiver.command}\" -DCMAKE_CXX_FLAGS=\"#{spec.cxx.flags.join(' ')}\" -DCMAKE_C_COMPILER=\"#{spec.cc.command}\" -DCMAKE_C_COMPILER_AR=\"#{spec.archiver.command}\" -DCMAKE_C_FLAGS=\"#{spec.cc.flags.join(' ')}\" -DCMAKE_LINKER=\"#{spec.linker.command}\" -DCMAKE_MODULE_LINKER_FLAGS=\"#{spec.linker.flags.join(' ')}\""
       sh "mkdir -p #{spec.build_dir}/build && cd #{spec.build_dir}/build && cmake #{cmake_opts} #{spec.dir}/deps/msgpack-c/ && cmake --build . && cmake --build . --target install"
     end
