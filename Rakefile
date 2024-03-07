@@ -2,7 +2,7 @@ MRUBY_CONFIG=File.expand_path(ENV["MRUBY_CONFIG"] || "build_config.rb")
 
 file :mruby do
   sh "git clone --depth=1 https://github.com/mruby/mruby.git"
-  sh "cd deps/msgpack-c && git submodule init && git submodule fetch"
+  sh "cd deps/msgpack-c && git submodule init && git fetch"
 end
 
 desc "compile binary"
