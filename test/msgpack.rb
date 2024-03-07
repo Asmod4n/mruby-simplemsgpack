@@ -14,14 +14,9 @@ assert("TrueClass#to_msgpack") do
 end
 
 assert("Integer#to_msgpack") do
-  [Mrbtest::FIXNUM_MIN, -1, 0, 1, Mrbtest::FIXNUM_MAX].each do |int|
-    expected = int
-
-    actual = MessagePack.unpack(int.to_msgpack)
-    assert_true actual.equal?(expected), "Expected identity", assertion_diff(expected, actual)
-
-    actual = MessagePack.unpack(MessagePack.pack(int))
-    assert_true actual.equal?(expected), "Expected identity", assertion_diff(expected, actual)
+  [MessagePackTest::FIXNUM_MIN, -1, 0, 1, MessagePackTest::FIXNUM_MAX].each do |int|
+    assert_equal(int, MessagePack.unpack(int.to_msgpack))
+    assert_equal(int, MessagePack.unpack(MessagePack.pack(int)))
   end
 end
 
@@ -29,13 +24,8 @@ if Object.const_defined? "Float"
   assert("Float#to_msgpack") do
     floats = [2.2250738585072014e-308, -1.7976931348623157e+308, 1.192092896e-07, 3.402823466e+38, 1.175494351e-38, 1.7976931348623157e+308, -2.2250738585072014e-308]
     floats.each do |float|
-      expected = float
-
-      actual = MessagePack.unpack(float.to_msgpack)
-      assert_true actual.equal?(expected), "Expected identity", assertion_diff(expected, actual)
-
-      actual = MessagePack.unpack(MessagePack.pack(float))
-      assert_true actual.equal?(expected), "Expected identity", assertion_diff(expected, actual)
+      assert_equal(float, MessagePack.unpack(float.to_msgpack))
+      assert_equal(float, MessagePack.unpack(MessagePack.pack(float)))
     end
   end
 end
@@ -208,4 +198,3 @@ end
 assert("C Packing and unpacking") do
   assert_equal("hallo", MessagePackTest.test_unpack(MessagePackTest.test_pack))
 end
-

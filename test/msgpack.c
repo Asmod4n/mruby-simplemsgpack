@@ -21,4 +21,6 @@ mrb_mruby_simplemsgpack_gem_test(mrb_state *mrb)
   struct RClass *msgpack_test = mrb_define_module(mrb, "MessagePackTest");
   mrb_define_module_function(mrb, msgpack_test, "test_pack", mrb_msgpack_test_pack, MRB_ARGS_NONE());
   mrb_define_module_function(mrb, msgpack_test, "test_unpack", mrb_msgpack_test_unpack, MRB_ARGS_REQ(1));
+  mrb_define_const(mrb, msgpack_test, "FIXNUM_MAX", mrb_int_value(mrb, MRB_INT_MAX));
+  mrb_define_const(mrb, msgpack_test, "FIXNUM_MIN", mrb_int_value(mrb, MRB_INT_MIN));
 }

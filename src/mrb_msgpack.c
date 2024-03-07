@@ -617,7 +617,6 @@ mrb_msgpack_unpack(mrb_state *mrb, mrb_value data)
     mrb_msgpack_unpack_m_cb_data cb_data = {data, RSTRING_PTR(data), RSTRING_LEN(data), mrb_nil_value(), &result};
     mrb_value cb_data_cptr = mrb_cptr_value(mrb, &cb_data);
     mrb_value unpack_return = mrb_ensure(mrb, mrb_msgpack_unpack_m_cb, cb_data_cptr, mrb_msgpack_unpack_m_ensure, cb_data_cptr);
-    mrb_gc_protect(mrb, unpack_return);
     return unpack_return;
 }
 
