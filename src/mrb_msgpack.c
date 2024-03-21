@@ -12,7 +12,9 @@
 #include <mruby/throw.h>
 #include <mruby/variable.h>
 #include <mruby/numeric.h>
+#include <mruby/internal.h>
 #include "mruby/msgpack.h"
+#include <mruby/string_is_utf8.h>
 
 typedef struct {
     mrb_state* mrb;
@@ -37,6 +39,7 @@ mrb_msgpack_data_write(void* data, const char* buf, size_t len)
         return 0;
     }
 }
+
 #define pack_integer_helper_(x, pk, self) msgpack_pack_int##x(pk, mrb_integer(self))
 #define pack_integer_helper(x, pk, self) pack_integer_helper_(x, pk, self)
 #define mrb_msgpack_pack_int(pk, self) pack_integer_helper(MRB_INT_BIT, pk, self)
@@ -69,14 +72,18 @@ static void
 mrb_msgpack_pack_string_value(mrb_state *mrb, mrb_value self, msgpack_packer* pk)
 {
     int rc;
-    if (memchr(RSTRING_PTR(self), '\0', RSTRING_LEN(self))) {
-        rc = msgpack_pack_bin(pk, RSTRING_LEN(self));
-        if (likely(rc == 0))
-            rc = msgpack_pack_bin_body(pk, RSTRING_PTR(self), RSTRING_LEN(self));
-    } else {
+#ifdef MRB_UTF8_STRING
+    if (RSTRING_LEN(self) == mrb_utf8_strlen(RSTRING_PTR(self), RSTRING_LEN(self))) {
+#else
+    if (mrb_str_is_utf8(self)) {
+#endif
         rc = msgpack_pack_str(pk, RSTRING_LEN(self));
         if (likely(rc == 0))
             rc = msgpack_pack_str_body(pk, RSTRING_PTR(self), RSTRING_LEN(self));
+    } else {
+        rc = msgpack_pack_bin(pk, RSTRING_LEN(self));
+        if (likely(rc == 0))
+            rc = msgpack_pack_bin_body(pk, RSTRING_PTR(self), RSTRING_LEN(self));
     }
     if (unlikely(rc < 0)) {
         mrb_raise(mrb, E_MSGPACK_ERROR, "cannot pack string");
@@ -568,8 +575,10 @@ mrb_msgpack_unpack_m_cb(mrb_state *mrb, mrb_value self_data_block_result)
     msgpack_unpacked_init(result);
     if (mrb_type(block) == MRB_TT_PROC) {
         ret = msgpack_unpack_next(result, str, str_len, &off);
+        int arena_index = mrb_gc_arena_save(mrb);
         while(ret == MSGPACK_UNPACK_SUCCESS) {
             mrb_yield(mrb, block, mrb_unpack_msgpack_obj(mrb, result->data));
+            mrb_gc_arena_restore(mrb, arena_index);
             ret = msgpack_unpack_next(result, str, str_len, &off);
         }
         switch (ret) {
@@ -616,8 +625,7 @@ mrb_msgpack_unpack(mrb_state *mrb, mrb_value data)
     msgpack_unpacked result;
     mrb_msgpack_unpack_m_cb_data cb_data = {data, RSTRING_PTR(data), RSTRING_LEN(data), mrb_nil_value(), &result};
     mrb_value cb_data_cptr = mrb_cptr_value(mrb, &cb_data);
-    mrb_value unpack_return = mrb_ensure(mrb, mrb_msgpack_unpack_m_cb, cb_data_cptr, mrb_msgpack_unpack_m_ensure, cb_data_cptr);
-    return unpack_return;
+    return mrb_ensure(mrb, mrb_msgpack_unpack_m_cb, cb_data_cptr, mrb_msgpack_unpack_m_ensure, cb_data_cptr);
 }
 
 static mrb_value
