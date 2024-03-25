@@ -22,8 +22,7 @@ end
 
 if Object.const_defined? "Float"
   assert("Float#to_msgpack") do
-    floats = [2.2250738585072014e-308, -1.7976931348623157e+308, 1.192092896e-07, 3.402823466e+38, 1.175494351e-38, 1.7976931348623157e+308, -2.2250738585072014e-308]
-    floats.each do |float|
+    [MessagePackTest::FLOAT_MIN, -1.0, 0.0, 1.0, MessagePackTest::FLOAT_MAX].each do |float|
       assert_equal(float, MessagePack.unpack(float.to_msgpack))
       assert_equal(float, MessagePack.unpack(MessagePack.pack(float)))
     end
@@ -73,29 +72,29 @@ assert("MessagePack.unpack with block") do
   packed3 = value3.to_msgpack
 
   packed = packed1 + packed2 + packed3
-  chunk1 = packed[0..packed1.length+5]
-  chunk2 = packed[packed1.length+5..-1]
+  chunk1 = packed.byteslice(0..packed1.bytesize+5)
+  chunk2 = packed.byteslice(packed1.bytesize+5..-1)
 
   unpacked = []
 
   # unpack everything possible from chunk1
-  unpacked_length = MessagePack.unpack(chunk1) { |value| unpacked << value }
-  unpacked_length -= 1
+  unpacked_bytesize = MessagePack.unpack(chunk1) { |value| unpacked << value }
+  unpacked_bytesize -= 1
 
   # only value1 can be unpacked
-  assert_equal(unpacked_length, packed1.length)
+  assert_equal(unpacked_bytesize, packed1.bytesize)
   assert_equal(unpacked, [value1])
 
   # remove unpacked bytes from chunk1
-  slice_start = unpacked_length
-  slice_length = chunk1.length - (unpacked_length+1)
-  chunk1 = chunk1.slice(slice_start, slice_length)
+  slice_start = unpacked_bytesize
+  slice_bytesize = chunk1.bytesize - (unpacked_bytesize+1)
+  chunk1 = chunk1.byteslice(slice_start, slice_bytesize)
 
   # continue unpacking with rest of chunk1 and chunk2
-  unpacked_length = MessagePack.unpack(chunk1 + chunk2) { |value| unpacked << value }
+  unpacked_bytesize = MessagePack.unpack(chunk1 + chunk2) { |value| unpacked << value }
 
   # now, everything is unpacked
-  assert_equal(unpacked_length, chunk1.length + chunk2.length)
+  assert_equal(unpacked_bytesize, chunk1.bytesize + chunk2.bytesize)
   assert_equal(unpacked, [value1, value2, value3])
 end
 

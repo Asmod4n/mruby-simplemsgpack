@@ -1,4 +1,5 @@
 #include <mruby/msgpack.h>
+#include <limits.h>
 
 static mrb_value
 mrb_msgpack_test_pack(mrb_state *mrb, mrb_value self)
@@ -23,4 +24,13 @@ mrb_mruby_simplemsgpack_gem_test(mrb_state *mrb)
   mrb_define_module_function(mrb, msgpack_test, "test_unpack", mrb_msgpack_test_unpack, MRB_ARGS_REQ(1));
   mrb_define_const(mrb, msgpack_test, "FIXNUM_MAX", mrb_int_value(mrb, MRB_INT_MAX));
   mrb_define_const(mrb, msgpack_test, "FIXNUM_MIN", mrb_int_value(mrb, MRB_INT_MIN));
+#ifndef MRB_WITHOUT_FLOAT
+#ifdef MRB_USE_FLOAT
+    mrb_define_const(mrb, msgpack_test, "FLOAT_MAX", mrb_float_value(mrb, FLT_MAX));
+    mrb_define_const(mrb, msgpack_test, "FLOAT_MIN", mrb_float_value(mrb, FLT_MIN));
+#else
+    mrb_define_const(mrb, msgpack_test, "FLOAT_MAX", mrb_float_value(mrb, DBL_MAX));
+    mrb_define_const(mrb, msgpack_test, "FLOAT_MIN", mrb_float_value(mrb, DBL_MIN));
+#endif
+#endif
 }
