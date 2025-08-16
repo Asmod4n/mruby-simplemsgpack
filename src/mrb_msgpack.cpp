@@ -12,9 +12,12 @@
 #include <mruby/throw.h>
 #include <mruby/variable.h>
 #include <mruby/numeric.h>
+MRB_BEGIN_DECL
 #include <mruby/internal.h>
-#include "mruby/msgpack.h"
+MRB_END_DECL
+#include <mruby/msgpack.h>
 #include <mruby/string_is_utf8.h>
+#include <mruby/presym.h>
 
 typedef struct {
     mrb_state* mrb;
@@ -98,8 +101,8 @@ mrb_msgpack_get_ext_config(mrb_state* mrb, mrb_value obj)
     mrb_int classes_count;
 
     mrb_value ext_packers = mrb_const_get(mrb,
-        mrb_obj_value(mrb_module_get(mrb, "MessagePack")),
-        mrb_intern_lit(mrb, "_ExtPackers"));
+        mrb_obj_value(mrb_module_get_id(mrb, MRB_SYM(MessagePack))),
+        MRB_SYM(_ExtPackers));
     mrb_value obj_class = mrb_obj_value(mrb_obj_class(mrb, obj));
     mrb_value ext_config = mrb_hash_get(mrb, ext_packers, obj_class);
 
@@ -140,7 +143,7 @@ mrb_msgpack_pack_ext_value(mrb_state* mrb, mrb_value self, msgpack_packer* pk)
         return FALSE;
     }
 
-    packer = mrb_hash_get(mrb, ext_config, mrb_symbol_value(mrb_intern_lit(mrb, "packer")));
+    packer = mrb_hash_get(mrb, ext_config, mrb_symbol_value(MRB_SYM(packer)));
     if (unlikely(mrb_type(packer) != MRB_TT_PROC)) {
         mrb_gc_arena_restore(mrb, arena_index);
         mrb_raise(mrb, E_TYPE_ERROR, "malformed packer");
@@ -152,7 +155,7 @@ mrb_msgpack_pack_ext_value(mrb_state* mrb, mrb_value self, msgpack_packer* pk)
         mrb_raise(mrb, E_TYPE_ERROR, "no string returned by ext type packer");
     }
 
-    type = mrb_hash_get(mrb, ext_config, mrb_symbol_value(mrb_intern_lit(mrb, "type")));
+    type = mrb_hash_get(mrb, ext_config, mrb_symbol_value(MRB_SYM(type)));
     if (unlikely(!mrb_integer_p(type))) {
         mrb_gc_arena_restore(mrb, arena_index);
         mrb_raise(mrb, E_TYPE_ERROR, "malformed type");
@@ -460,16 +463,16 @@ mrb_unpack_msgpack_obj(mrb_state* mrb, msgpack_object obj)
             return mrb_str_new(mrb, obj.via.bin.ptr, obj.via.bin.size);
         case MSGPACK_OBJECT_EXT: {
             mrb_value unpacker = mrb_hash_get(mrb,
-                mrb_const_get(mrb, mrb_obj_value(mrb_module_get(mrb, "MessagePack")), mrb_intern_lit(mrb, "_ExtUnpackers")),
+                mrb_const_get(mrb, mrb_obj_value(mrb_module_get(mrb, "MessagePack")), MRB_SYM(_ExtUnpackers)),
                 mrb_int_value(mrb, obj.via.ext.type));
             if (mrb_type(unpacker) == MRB_TT_PROC) {
                 return mrb_yield(mrb, unpacker, mrb_str_new(mrb, obj.via.ext.ptr, obj.via.ext.size));
             } else {
                 mrb_raisef(mrb, E_MSGPACK_ERROR, "Cannot unpack ext type %S", mrb_int_value(mrb, obj.via.ext.type));
             }
+        }
         default: // should not happen
             mrb_raise(mrb, E_MSGPACK_ERROR, "Cannot unpack unknown msgpack type");
-        }
     }
 }
 
@@ -665,10 +668,10 @@ mrb_msgpack_register_pack_type(mrb_state* mrb, mrb_value self)
         mrb_raise(mrb, E_TYPE_ERROR, "not a block");
     }
 
-    ext_packers = mrb_const_get(mrb, self, mrb_intern_lit(mrb, "_ExtPackers"));
+    ext_packers = mrb_const_get(mrb, self, MRB_SYM(_ExtPackers));
     ext_config = mrb_hash_new_capa(mrb, 2);
-    mrb_hash_set(mrb, ext_config, mrb_symbol_value(mrb_intern_lit(mrb, "type")), mrb_int_value(mrb, type));
-    mrb_hash_set(mrb, ext_config, mrb_symbol_value(mrb_intern_lit(mrb, "packer")), block);
+    mrb_hash_set(mrb, ext_config, mrb_symbol_value(MRB_SYM(type)), mrb_int_value(mrb, type));
+    mrb_hash_set(mrb, ext_config, mrb_symbol_value(MRB_SYM(packer)), block);
     mrb_hash_set(mrb, ext_packers, mrb_class, ext_config);
 
     return mrb_nil_value();
@@ -680,7 +683,7 @@ mrb_msgpack_ext_packer_registered(mrb_state *mrb, mrb_value self)
     mrb_value mrb_class;
     mrb_get_args(mrb, "C", &mrb_class);
 
-    return mrb_bool_value(mrb_test(mrb_hash_get(mrb, mrb_const_get(mrb, self, mrb_intern_lit(mrb, "_ExtPackers")), mrb_class)));
+    return mrb_bool_value(mrb_test(mrb_hash_get(mrb, mrb_const_get(mrb, self, MRB_SYM(_ExtPackers)), mrb_class)));
 }
 
 static mrb_value
@@ -701,7 +704,7 @@ mrb_msgpack_register_unpack_type(mrb_state* mrb, mrb_value self)
         mrb_raise(mrb, E_TYPE_ERROR, "not a block");
     }
 
-    mrb_hash_set(mrb, mrb_const_get(mrb, self, mrb_intern_lit(mrb, "_ExtUnpackers")), mrb_int_value(mrb, type), block);
+    mrb_hash_set(mrb, mrb_const_get(mrb, self, MRB_SYM(_ExtUnpackers)), mrb_int_value(mrb, type), block);
 
     return mrb_nil_value();
 }
@@ -712,9 +715,10 @@ mrb_msgpack_ext_unpacker_registered(mrb_state *mrb, mrb_value self)
     mrb_int type;
     mrb_get_args(mrb, "i", &type);
 
-    return mrb_bool_value(!mrb_nil_p(mrb_hash_get(mrb, mrb_const_get(mrb, self, mrb_intern_lit(mrb, "_ExtUnpackers")), mrb_int_value(mrb, type))));
+    return mrb_bool_value(!mrb_nil_p(mrb_hash_get(mrb, mrb_const_get(mrb, self, MRB_SYM(_ExtUnpackers)), mrb_int_value(mrb, type))));
 }
 
+MRB_BEGIN_DECL
 void
 mrb_mruby_simplemsgpack_gem_init(mrb_state* mrb)
 {
@@ -748,3 +752,4 @@ mrb_mruby_simplemsgpack_gem_init(mrb_state* mrb)
 }
 
 void mrb_mruby_simplemsgpack_gem_final(mrb_state* mrb) {}
+MRB_END_DECL
