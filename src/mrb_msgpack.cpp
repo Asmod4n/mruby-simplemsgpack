@@ -17,6 +17,9 @@ extern "C" {
 }
 #include <mruby/cpp_helpers.hpp>
 
+#include <string>
+#include <sstream>
+
 #if ((defined(__has_builtin) && __has_builtin(__builtin_expect))||(__GNUC__ >= 3) || (__INTEL_COMPILER >= 800) || defined(__clang__))
 #define likely(x) __builtin_expect(!!(x), 1)
 #define unlikely(x) __builtin_expect(!!(x), 0)
@@ -640,38 +643,19 @@ mrb_msgpack_unpack_lazy_m(mrb_state *mrb, mrb_value self)
   return mrb_undef_value();
 }
 
-#include <string>
-#include <sstream>
-
 static std::string_view
 unescape_json_pointer_sv(std::string_view s, std::string &scratch) {
-    // table maps '0' and '1' to unescaped chars, 0 means "no special mapping"
-    static constexpr unsigned char esc_table[256] = {
-        /* ... all zero-initialized ... */
-        ['0'] = '~',
-        ['1'] = '/'
-    };
-
     scratch.clear();
     scratch.reserve(s.size());
-
     for (size_t i = 0; i < s.size(); ++i) {
-        unsigned char c = static_cast<unsigned char>(s[i]);
-        if (c == '~' && i + 1 < s.size()) {
-            unsigned char next = static_cast<unsigned char>(s[i + 1]);
-            unsigned char mapped = esc_table[next];
-            if (mapped) {
-                scratch.push_back(static_cast<char>(mapped));
-                ++i; // skip next
-                continue;
-            }
+        if (s[i] == '~' && i + 1 < s.size()) {
+            if (s[i + 1] == '0') { scratch.push_back('~'); ++i; continue; }
+            if (s[i + 1] == '1') { scratch.push_back('/'); ++i; continue; }
         }
-        scratch.push_back(static_cast<char>(c));
+        scratch.push_back(s[i]);
     }
-
     return std::string_view(scratch);
 }
-
 
 static mrb_value
 mrb_msgpack_object_handle_at_pointer(mrb_state *mrb, mrb_value self)
@@ -687,6 +671,15 @@ mrb_msgpack_object_handle_at_pointer(mrb_state *mrb, mrb_value self)
     }
 
     const msgpack::object *current = &handle->oh.get();
+
+    if (pointer.empty() || pointer == "/") {
+        return mrb_unpack_msgpack_obj(
+            mrb,
+            mrb_iv_get(mrb, self, MRB_SYM(data)),
+            *current,
+            handle->referenced
+        );
+    }
 
     if (pointer.front() != '/') {
         mrb_raise(mrb, E_ARGUMENT_ERROR, "JSON Pointer must start with '/'");
