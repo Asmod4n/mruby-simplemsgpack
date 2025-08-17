@@ -69,6 +69,57 @@ offending_byte # => 19 (length of packed)
 unpacked # => ['bye']
 ```
 
+# Lazy unpacking
+
+Need to pull just a few values from a large MessagePack payload?
+`MessagePack.unpack_lazy` can be up to **10× faster** because it avoids fully unpacking the structure — only the parts you ask for are decoded.
+It returns a lightweight handle that lets you navigate using JSON Pointers:
+
+```ruby
+data = [
+  { "id" => 1, "name" => "Alpha" },
+  { "id" => 2, "name" => "Beta" },
+  { "id" => 3, "name" => "Gamma" },
+  { "id" => 4, "name" => "Delta", "meta" => { "active" => true } }
+]
+
+packed = MessagePack.pack(data)
+
+lazy = MessagePack.unpack_lazy(packed)
+
+# Access an element by JSON Pointer without fully unpacking everything
+lazy.at_pointer("/3/name")        # => "Delta"
+lazy.at_pointer("/3/meta/active") # => true
+lazy.at_pointer("/3")             # => { "id" => 4, "name" => "Delta", "meta" => { "active" => true } }
+
+# Root access (returns entire unpacked object)
+lazy.value  # => full data
+```
+## Error handling
+
+When using `MessagePack.unpack_lazy(...).at_pointer(pointer)`, specific exceptions are raised for invalid pointers or traversal mistakes:
+
+```ruby
+data = [
+  { "id" => 1, "name" => "Alpha" },
+  { "id" => 2, "name" => "Beta" }
+]
+
+lazy = MessagePack.unpack_lazy(MessagePack.pack(data))
+
+# Non-existent array index
+lazy.at_pointer("/99/name")
+# => IndexError (array index out of range)
+
+# Non-existent key in an object
+lazy.at_pointer("/0/nope")
+# => KeyError (key not found)
+
+# Attempting to navigate into a scalar value
+lazy.at_pointer("/0/name/foo")
+# => TypeError (cannot navigate into a string)
+```
+
 Extension Types
 ---------------
 

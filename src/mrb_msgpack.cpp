@@ -15,6 +15,7 @@
 extern "C" {
 #include <mruby/internal.h>
 }
+#include <mruby/cpp_helpers.hpp>
 
 #if ((defined(__has_builtin) && __has_builtin(__builtin_expect))||(__GNUC__ >= 3) || (__INTEL_COMPILER >= 800) || defined(__clang__))
 #define likely(x) __builtin_expect(!!(x), 1)
@@ -484,6 +485,7 @@ mrb_unpack_msgpack_obj(mrb_state* mrb, mrb_value data, const msgpack::object& ob
     default:
       mrb_raise(mrb, E_MSGPACK_ERROR, "Cannot unpack unknown msgpack type");
   }
+  return mrb_undef_value();
 }
 
 static mrb_value
@@ -523,9 +525,9 @@ mrb_unpack_msgpack_obj_map(mrb_state* mrb, mrb_value data, const msgpack::object
 
 bool my_reference_func(msgpack::type::object_type type, std::size_t length, void* user_data) {
   switch(type) {
+    case msgpack::type::STR:
     case msgpack::type::BIN:
     case msgpack::type::EXT:
-    case msgpack::type::STR:
       return true;
     default:
       return false;
@@ -545,6 +547,7 @@ mrb_msgpack_unpack(mrb_state *mrb, mrb_value data)
   catch (const std::exception &e) {
     mrb_raisef(mrb, E_MSGPACK_ERROR, "Can't unpack: %S", mrb_str_new_cstr(mrb, e.what()));
   }
+  return mrb_undef_value();
 }
 
 static mrb_value
@@ -579,7 +582,180 @@ mrb_msgpack_unpack_m(mrb_state* mrb, mrb_value self)
   catch (const std::exception &e) {
     mrb_raisef(mrb, E_MSGPACK_ERROR, "Can't unpack: %S", mrb_str_new_cstr(mrb, e.what()));
   }
+  return mrb_undef_value();
 }
+
+struct msgpack_object_handle {
+  msgpack::object_handle oh;
+  std::size_t off;
+  bool referenced;
+
+  msgpack_object_handle()
+      : oh(msgpack::object_handle()),
+        off(0),
+        referenced(false)
+  {}
+
+};
+
+MRB_CPP_DEFINE_TYPE(msgpack_object_handle, msgpack_object_handle)
+
+static mrb_value
+mrb_msgpack_object_handle_new(mrb_state *mrb, mrb_value self)
+{
+  mrb_value data;
+  mrb_get_args(mrb, "S", &data);
+  mrb_cpp_new<msgpack_object_handle>(mrb, self);
+  mrb_iv_set(mrb, self, MRB_SYM(data), data);
+  return self;
+}
+
+static mrb_value
+mrb_msgpack_object_handle_value(mrb_state *mrb, mrb_value self)
+{
+  msgpack_object_handle* handle = static_cast<msgpack_object_handle*>(DATA_PTR(self));
+  if (unlikely(!handle)) {
+    mrb_raise(mrb, E_MSGPACK_ERROR, "ObjectHandle is not initialized");
+  }
+  return mrb_unpack_msgpack_obj(mrb, mrb_iv_get(mrb, self, MRB_SYM(data)), handle->oh.get(), handle->referenced);
+}
+
+static mrb_value
+mrb_msgpack_unpack_lazy_m(mrb_state *mrb, mrb_value self)
+{
+  mrb_value data;
+  mrb_get_args(mrb, "o", &data);
+  data = mrb_str_to_str(mrb, data);
+
+  try {
+    mrb_value object_handle = mrb_obj_new(mrb, mrb_class_get_under_id(mrb, mrb_module_get_id(mrb, MRB_SYM(MessagePack)), MRB_SYM(ObjectHandle)), 1, &data);
+    msgpack_object_handle* handle = static_cast<msgpack_object_handle*>(DATA_PTR(object_handle));
+    msgpack::unpack(handle->oh, RSTRING_PTR(data), RSTRING_LEN(data), handle->off, handle->referenced, my_reference_func);
+
+    return object_handle;
+  }
+  catch (const std::exception &e) {
+    mrb_raisef(mrb, E_MSGPACK_ERROR, "Can't unpack: %S", mrb_str_new_cstr(mrb, e.what()));
+  }
+  return mrb_undef_value();
+}
+
+#include <string>
+#include <sstream>
+
+static std::string_view
+unescape_json_pointer_sv(std::string_view s, std::string &scratch) {
+    // table maps '0' and '1' to unescaped chars, 0 means "no special mapping"
+    static constexpr unsigned char esc_table[256] = {
+        /* ... all zero-initialized ... */
+        ['0'] = '~',
+        ['1'] = '/'
+    };
+
+    scratch.clear();
+    scratch.reserve(s.size());
+
+    for (size_t i = 0; i < s.size(); ++i) {
+        unsigned char c = static_cast<unsigned char>(s[i]);
+        if (c == '~' && i + 1 < s.size()) {
+            unsigned char next = static_cast<unsigned char>(s[i + 1]);
+            unsigned char mapped = esc_table[next];
+            if (mapped) {
+                scratch.push_back(static_cast<char>(mapped));
+                ++i; // skip next
+                continue;
+            }
+        }
+        scratch.push_back(static_cast<char>(c));
+    }
+
+    return std::string_view(scratch);
+}
+
+
+static mrb_value
+mrb_msgpack_object_handle_at_pointer(mrb_state *mrb, mrb_value self)
+{
+    mrb_value str;
+    mrb_get_args(mrb, "S", &str);
+    std::string_view pointer(RSTRING_PTR(str), RSTRING_LEN(str));
+
+    auto *handle = static_cast<msgpack_object_handle*>(DATA_PTR(self));
+    if (unlikely(!handle)) {
+        mrb_raise(mrb, E_MSGPACK_ERROR, "ObjectHandle is not initialized");
+        return mrb_undef_value();
+    }
+
+    const msgpack::object *current = &handle->oh.get();
+
+    if (pointer.front() != '/') {
+        mrb_raise(mrb, E_ARGUMENT_ERROR, "JSON Pointer must start with '/'");
+        return mrb_undef_value();
+    }
+    pointer.remove_prefix(1); // skip leading '/'
+
+    std::string scratch; // reused buffer for unescaping
+
+    while (!pointer.empty()) {
+        size_t pos = pointer.find('/');
+        std::string_view token_view =
+            (pos == std::string_view::npos) ? pointer : pointer.substr(0, pos);
+
+        token_view = unescape_json_pointer_sv(token_view, scratch);
+
+        if (current->type == msgpack::type::MAP) {
+            bool found = false;
+            for (uint32_t i = 0; i < current->via.map.size; ++i) {
+                const auto &kv = current->via.map.ptr[i];
+                if (kv.key.type == msgpack::type::STR &&
+                    token_view == std::string_view(kv.key.via.str.ptr, kv.key.via.str.size)) {
+                    current = &kv.val;
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                mrb_raise(mrb, E_KEY_ERROR,
+                          ("Key not found: " + std::string(token_view)).c_str());
+                return mrb_undef_value();
+            }
+        }
+        else if (current->type == msgpack::type::ARRAY) {
+            long idx = 0;
+            for (char c : token_view) {
+                if (c < '0' || c > '9') {
+                    mrb_raise(mrb, E_INDEX_ERROR,
+                              ("Invalid array index: " + std::string(token_view)).c_str());
+                    return mrb_undef_value();
+                }
+                idx = idx * 10 + (c - '0');
+            }
+            if (idx < 0 || static_cast<size_t>(idx) >= current->via.array.size) {
+                mrb_raise(mrb, E_INDEX_ERROR,
+                          ("Invalid array index: " + std::string(token_view)).c_str());
+                return mrb_undef_value();
+            }
+            current = &current->via.array.ptr[idx];
+        }
+        else {
+            mrb_raise(mrb, E_TYPE_ERROR, "Cannot navigate into non-container");
+            return mrb_undef_value();
+        }
+
+        if (pos == std::string_view::npos) break;
+        pointer.remove_prefix(pos + 1);
+    }
+
+    return mrb_unpack_msgpack_obj(
+        mrb,
+        mrb_iv_get(mrb, self, MRB_SYM(data)),
+        *current,
+        handle->referenced
+    );
+}
+
+
+
 
 static mrb_value
 mrb_msgpack_register_unpack_type(mrb_state* mrb, mrb_value self)
@@ -617,7 +793,7 @@ MRB_BEGIN_DECL
 void
 mrb_mruby_simplemsgpack_gem_init(mrb_state* mrb)
 {
-    struct RClass* msgpack_mod;
+    struct RClass* msgpack_mod, *mrb_object_handle_class;
 
     mrb_define_method(mrb, mrb->object_class, "to_msgpack", mrb_msgpack_pack_object, MRB_ARGS_NONE());
     mrb_define_method(mrb, mrb->string_class, "to_msgpack", mrb_msgpack_pack_string, MRB_ARGS_NONE());
@@ -632,6 +808,12 @@ mrb_mruby_simplemsgpack_gem_init(mrb_state* mrb)
     mrb_define_method(mrb, mrb->nil_class, "to_msgpack", mrb_msgpack_pack_nil, MRB_ARGS_NONE());
     msgpack_mod = mrb_define_module(mrb, "MessagePack");
     mrb_define_class_under(mrb, msgpack_mod, "Error", E_RUNTIME_ERROR);
+    mrb_object_handle_class = mrb_define_class_under(mrb, msgpack_mod, "ObjectHandle", mrb->object_class);
+    MRB_SET_INSTANCE_TT(mrb_object_handle_class, MRB_TT_DATA);
+    mrb_define_method(mrb, mrb_object_handle_class, "initialize", mrb_msgpack_object_handle_new, MRB_ARGS_REQ(1));
+    mrb_define_method(mrb, mrb_object_handle_class, "value", mrb_msgpack_object_handle_value, MRB_ARGS_NONE());
+    mrb_define_method(mrb, mrb_object_handle_class, "at_pointer", mrb_msgpack_object_handle_at_pointer, MRB_ARGS_REQ(1));
+
 
     mrb_define_const(mrb, msgpack_mod, "LibMsgPackCVersion", mrb_str_new_lit(mrb, MSGPACK_VERSION));
     mrb_define_const(mrb, msgpack_mod, "_ExtPackers", mrb_hash_new(mrb));
@@ -641,6 +823,7 @@ mrb_mruby_simplemsgpack_gem_init(mrb_state* mrb)
     mrb_define_module_function(mrb, msgpack_mod, "register_pack_type", mrb_msgpack_register_pack_type, (MRB_ARGS_REQ(2)|MRB_ARGS_BLOCK()));
     mrb_define_module_function(mrb, msgpack_mod, "ext_packer_registered?", mrb_msgpack_ext_packer_registered, MRB_ARGS_REQ(1));
     mrb_define_module_function(mrb, msgpack_mod, "unpack", mrb_msgpack_unpack_m, (MRB_ARGS_REQ(1)|MRB_ARGS_BLOCK()));
+    mrb_define_module_function(mrb, msgpack_mod, "unpack_lazy", mrb_msgpack_unpack_lazy_m, (MRB_ARGS_REQ(1)));
     mrb_define_module_function(mrb, msgpack_mod, "register_unpack_type", mrb_msgpack_register_unpack_type, (MRB_ARGS_REQ(1)|MRB_ARGS_BLOCK()));
     mrb_define_module_function(mrb, msgpack_mod, "ext_unpacker_registered?", mrb_msgpack_ext_unpacker_registered, MRB_ARGS_REQ(1));
 }

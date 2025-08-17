@@ -197,3 +197,37 @@ end
 assert("C Packing and unpacking") do
   assert_equal("hallo", MessagePackTest.test_unpack(MessagePackTest.test_pack))
 end
+
+assert("MessagePack.unpack_lazy with JSON Pointer navigation") do
+  data = [
+    { "id" => 1, "name" => "Alpha" },
+    { "id" => 2, "name" => "Beta" },
+    { "id" => 3, "name" => "Gamma" },
+    { "id" => 4, "name" => "Delta", "meta" => { "active" => true } }
+  ]
+
+  packed = MessagePack.pack(data)
+  lazy = MessagePack.unpack_lazy(packed)
+
+  # Directly into array element and key
+  assert_equal("Delta", lazy.at_pointer("/3/name"))
+
+  # Into nested object under that element
+  assert_equal(true, lazy.at_pointer("/3/meta/active"))
+
+  # Whole element
+  assert_equal({ "id" => 4, "name" => "Delta", "meta" => { "active" => true } },
+               lazy.at_pointer("/3"))
+
+  # Root access
+  assert_equal(data, lazy.at_pointer("/"))
+
+  # Error: non-existent index
+  assert_raise(IndexError) { lazy.at_pointer("/99/name") }
+
+  # Error: bad key on object
+  assert_raise(KeyError) { lazy.at_pointer("/0/nope") }
+
+  # Error: wrong type traversal (trying to descend into string)
+  assert_raise(TypeError) { lazy.at_pointer("/0/name/foo") }
+end
