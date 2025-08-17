@@ -1,5 +1,6 @@
 // mruby-simplemsgpack C++ packer wrapper (msgpack::packer + msgpack::sbuffer)
 #define MSGPACK_NO_BOOST
+#define MSGPACK_DEFAULT_API_VERSION 3
 #include <msgpack.hpp>
 #include <mruby.h>
 #include <mruby/array.h>
@@ -438,13 +439,13 @@ mrb_msgpack_ext_packer_registered(mrb_state *mrb, mrb_value self)
 }
 
 // Forward decls
-static mrb_value mrb_unpack_msgpack_obj(mrb_state* mrb, mrb_value data, const msgpack::object& obj, bool referenced);
-static mrb_value mrb_unpack_msgpack_obj_array(mrb_state* mrb, mrb_value data, const msgpack::object& obj, bool referenced);
-static mrb_value mrb_unpack_msgpack_obj_map(mrb_state* mrb, mrb_value data, const msgpack::object& obj, bool referenced);
+static mrb_value mrb_unpack_msgpack_obj(mrb_state* mrb, const msgpack::object& obj);
+static mrb_value mrb_unpack_msgpack_obj_array(mrb_state* mrb, const msgpack::object& obj);
+static mrb_value mrb_unpack_msgpack_obj_map(mrb_state* mrb, const msgpack::object& obj);
 
 // --- Core dispatch ---
 static mrb_value
-mrb_unpack_msgpack_obj(mrb_state* mrb, mrb_value data, const msgpack::object& obj, bool referenced)
+mrb_unpack_msgpack_obj(mrb_state* mrb, const msgpack::object& obj)
 {
   switch (obj.type) {
     case msgpack::type::NIL:
@@ -466,13 +467,13 @@ mrb_unpack_msgpack_obj(mrb_state* mrb, mrb_value data, const msgpack::object& ob
 # endif
 #endif
     case msgpack::type::STR:
-      return mrb_str_substr(mrb, data, obj.via.str.ptr - RSTRING_PTR(data), obj.via.str.size);
+      return mrb_str_new(mrb, obj.via.str.ptr, obj.via.str.size);
     case msgpack::type::BIN:
-      return mrb_str_substr(mrb, data, obj.via.bin.ptr - RSTRING_PTR(data), obj.via.bin.size);
+      return mrb_str_new(mrb, obj.via.bin.ptr, obj.via.bin.size);
     case msgpack::type::ARRAY:
-      return mrb_unpack_msgpack_obj_array(mrb, data, obj, referenced);
+      return mrb_unpack_msgpack_obj_array(mrb, obj);
     case msgpack::type::MAP:
-      return mrb_unpack_msgpack_obj_map(mrb, data, obj, referenced);
+      return mrb_unpack_msgpack_obj_map(mrb, obj);
     case msgpack::type::EXT: {
         auto ext_type = obj.via.ext.type();
 
@@ -480,7 +481,7 @@ mrb_unpack_msgpack_obj(mrb_state* mrb, mrb_value data, const msgpack::object& ob
             mrb_const_get(mrb, mrb_obj_value(mrb_module_get_id(mrb, MRB_SYM(MessagePack))), MRB_SYM(_ExtUnpackers)),
             mrb_int_value(mrb, ext_type));
         if (likely(mrb_type(unpacker) == MRB_TT_PROC)) {
-            return mrb_yield(mrb, unpacker, mrb_str_substr(mrb, data, obj.via.ext.data() - RSTRING_PTR(data), obj.via.ext.size));
+            return mrb_yield(mrb, unpacker, mrb_str_new(mrb, obj.via.ext.data(), obj.via.ext.size));
         } else {
           mrb_raisef(mrb, E_MSGPACK_ERROR, "Cannot unpack ext type %S", mrb_int_value(mrb, ext_type));
         }
@@ -492,16 +493,14 @@ mrb_unpack_msgpack_obj(mrb_state* mrb, mrb_value data, const msgpack::object& ob
 }
 
 static mrb_value
-mrb_unpack_msgpack_obj_array(mrb_state* mrb, mrb_value data, const msgpack::object& obj, bool referenced)
+mrb_unpack_msgpack_obj_array(mrb_state* mrb, const msgpack::object& obj)
 {
   if (obj.via.array.size == 0) return mrb_ary_new(mrb);
 
   mrb_value ary = mrb_ary_new_capa(mrb, obj.via.array.size);
   mrb_int arena_index = mrb_gc_arena_save(mrb);
-  const msgpack::object* ptr = obj.via.array.ptr;
-  const msgpack::object* end = ptr + obj.via.array.size;
-  for (; ptr < end; ++ptr) {
-    mrb_ary_push(mrb, ary, mrb_unpack_msgpack_obj(mrb, data, *ptr, referenced));
+  for (uint32_t i = 0; i < obj.via.array.size; i++) {
+    mrb_ary_push(mrb, ary, mrb_unpack_msgpack_obj(mrb, obj.via.array.ptr[i]));
     mrb_gc_arena_restore(mrb, arena_index);
   }
 
@@ -509,32 +508,19 @@ mrb_unpack_msgpack_obj_array(mrb_state* mrb, mrb_value data, const msgpack::obje
 }
 
 static mrb_value
-mrb_unpack_msgpack_obj_map(mrb_state* mrb, mrb_value data, const msgpack::object& obj, bool referenced)
+mrb_unpack_msgpack_obj_map(mrb_state* mrb, const msgpack::object& obj)
 {
   if (obj.via.map.size == 0) return mrb_hash_new(mrb);
 
   mrb_value hash = mrb_hash_new_capa(mrb, obj.via.map.size);
   mrb_int arena_index = mrb_gc_arena_save(mrb);
-  const msgpack::object_kv* ptr = obj.via.map.ptr;
-  const msgpack::object_kv* end = ptr + obj.via.map.size;
-  for (; ptr < end; ++ptr) {
-    mrb_value key = mrb_unpack_msgpack_obj(mrb, data, ptr->key, referenced);
-    mrb_value val = mrb_unpack_msgpack_obj(mrb, data, ptr->val, referenced);
+  for (uint32_t i = 0; i < obj.via.map.size; i++) {
+    mrb_value key = mrb_unpack_msgpack_obj(mrb, obj.via.map.ptr[i].key);
+    mrb_value val = mrb_unpack_msgpack_obj(mrb, obj.via.map.ptr[i].val);
     mrb_hash_set(mrb, hash, key, val);
     mrb_gc_arena_restore(mrb, arena_index);
   }
   return hash;
-}
-
-bool my_reference_func(msgpack::type::object_type type, std::size_t length, void* user_data) {
-  switch(type) {
-    case msgpack::type::STR:
-    case msgpack::type::BIN:
-    case msgpack::type::EXT:
-      return true;
-    default:
-      return false;
-  }
 }
 
 MRB_API mrb_value
@@ -542,10 +528,8 @@ mrb_msgpack_unpack(mrb_state *mrb, mrb_value data)
 {
   data = mrb_str_to_str(mrb, data);
   try {
-    std::size_t off = 0;
-    bool referenced = false;
-    msgpack::object_handle oh = msgpack::unpack(RSTRING_PTR(data), RSTRING_LEN(data), off, referenced, my_reference_func);
-    return mrb_unpack_msgpack_obj(mrb, data, oh.get(), referenced);
+    msgpack::object_handle oh = msgpack::unpack(RSTRING_PTR(data), RSTRING_LEN(data));
+    return mrb_unpack_msgpack_obj(mrb, oh.get());
   }
   catch (const std::exception &e) {
     mrb_raisef(mrb, E_MSGPACK_ERROR, "Can't unpack: %S", mrb_str_new_cstr(mrb, e.what()));
@@ -563,14 +547,13 @@ mrb_msgpack_unpack_m(mrb_state* mrb, mrb_value self)
   const char* buf = RSTRING_PTR(data);
   std::size_t len = RSTRING_LEN(data);
   std::size_t off = 0;
-  bool referenced = false;
 
   try {
     if (mrb_type(block) == MRB_TT_PROC) {
       while (off < len) {
         try {
-          msgpack::object_handle oh = msgpack::unpack(buf, len, off, referenced, my_reference_func);
-          mrb_yield(mrb, block, mrb_unpack_msgpack_obj(mrb, data, oh.get(), referenced));
+          msgpack::object_handle oh = msgpack::unpack(buf, len, off);
+          mrb_yield(mrb, block, mrb_unpack_msgpack_obj(mrb, oh.get()));
         }
         catch (const msgpack::insufficient_bytes&) {
           break;
@@ -578,8 +561,8 @@ mrb_msgpack_unpack_m(mrb_state* mrb, mrb_value self)
       }
       return mrb_fixnum_value((mrb_int)off);
     } else {
-      msgpack::object_handle oh = msgpack::unpack(buf, len, off, referenced, my_reference_func);
-      return mrb_unpack_msgpack_obj(mrb, data, oh.get(), referenced);
+      msgpack::object_handle oh = msgpack::unpack(buf, len, off);
+      return mrb_unpack_msgpack_obj(mrb, oh.get());
     }
   }
   catch (const std::exception &e) {
@@ -591,13 +574,8 @@ mrb_msgpack_unpack_m(mrb_state* mrb, mrb_value self)
 struct msgpack_object_handle {
   msgpack::object_handle oh;
   std::size_t off;
-  bool referenced;
 
-  msgpack_object_handle()
-      : oh(msgpack::object_handle()),
-        off(0),
-        referenced(false)
-  {}
+  msgpack_object_handle() : oh(msgpack::object_handle()), off(0) {}
 
 };
 
@@ -620,7 +598,7 @@ mrb_msgpack_object_handle_value(mrb_state *mrb, mrb_value self)
   if (unlikely(!handle)) {
     mrb_raise(mrb, E_MSGPACK_ERROR, "ObjectHandle is not initialized");
   }
-  return mrb_unpack_msgpack_obj(mrb, mrb_iv_get(mrb, self, MRB_SYM(data)), handle->oh.get(), handle->referenced);
+  return mrb_unpack_msgpack_obj(mrb, handle->oh.get());
 }
 
 static mrb_value
@@ -633,7 +611,7 @@ mrb_msgpack_unpack_lazy_m(mrb_state *mrb, mrb_value self)
   try {
     mrb_value object_handle = mrb_obj_new(mrb, mrb_class_get_under_id(mrb, mrb_module_get_id(mrb, MRB_SYM(MessagePack)), MRB_SYM(ObjectHandle)), 1, &data);
     msgpack_object_handle* handle = static_cast<msgpack_object_handle*>(DATA_PTR(object_handle));
-    msgpack::unpack(handle->oh, RSTRING_PTR(data), RSTRING_LEN(data), handle->off, handle->referenced, my_reference_func);
+    msgpack::unpack(handle->oh, RSTRING_PTR(data), RSTRING_LEN(data), handle->off);
 
     return object_handle;
   }
@@ -673,12 +651,7 @@ mrb_msgpack_object_handle_at_pointer(mrb_state *mrb, mrb_value self)
     const msgpack::object *current = &handle->oh.get();
 
     if (pointer.empty() || pointer == "/") {
-        return mrb_unpack_msgpack_obj(
-            mrb,
-            mrb_iv_get(mrb, self, MRB_SYM(data)),
-            *current,
-            handle->referenced
-        );
+        return mrb_unpack_msgpack_obj(mrb, *current);
     }
 
     if (pointer.front() != '/') {
@@ -739,16 +712,8 @@ mrb_msgpack_object_handle_at_pointer(mrb_state *mrb, mrb_value self)
         pointer.remove_prefix(pos + 1);
     }
 
-    return mrb_unpack_msgpack_obj(
-        mrb,
-        mrb_iv_get(mrb, self, MRB_SYM(data)),
-        *current,
-        handle->referenced
-    );
+    return mrb_unpack_msgpack_obj(mrb, *current);
 }
-
-
-
 
 static mrb_value
 mrb_msgpack_register_unpack_type(mrb_state* mrb, mrb_value self)
