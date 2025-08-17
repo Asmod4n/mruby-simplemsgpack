@@ -15,7 +15,6 @@
 extern "C" {
 #include <mruby/internal.h>
 }
-#include <iostream>
 
 #if ((defined(__has_builtin) && __has_builtin(__builtin_expect))||(__GNUC__ >= 3) || (__INTEL_COMPILER >= 800) || defined(__clang__))
 #define likely(x) __builtin_expect(!!(x), 1)
@@ -48,7 +47,6 @@ public:
 template <typename Packer> static void mrb_msgpack_pack_value(mrb_state* mrb, mrb_value self, Packer& pk);
 template <typename Packer> static void mrb_msgpack_pack_array_value(mrb_state* mrb, mrb_value self, Packer& pk);
 template <typename Packer> static void mrb_msgpack_pack_hash_value(mrb_state* mrb, mrb_value self, Packer& pk);
-template <typename Packer> static mrb_bool mrb_msgpack_pack_ext_value(mrb_state* mrb, mrb_value self, Packer& pk);
 
 #define pack_integer_helper_(x, pk, self) pk.pack_int##x(static_cast<int##x##_t>(mrb_integer(self)))
 #define pack_integer_helper(x, pk, self)  pack_integer_helper_(x, pk, self)
@@ -88,30 +86,32 @@ static inline void mrb_msgpack_pack_string_value(mrb_state *mrb, mrb_value self,
 template <typename Packer>
 static void mrb_msgpack_pack_array_value(mrb_state* mrb, mrb_value self, Packer& pk) {
   mrb_int n = RARRAY_LEN(self);
+  mrb_int arena_index = mrb_gc_arena_save(mrb);
   pk.pack_array(static_cast<uint32_t>(n));
   for (mrb_int i = 0; i < n; ++i) {
     mrb_msgpack_pack_value(mrb, mrb_ary_ref(mrb, self, i), pk);
+    mrb_gc_arena_restore(mrb, arena_index);
   }
 }
 
 template <typename Packer>
 static void mrb_msgpack_pack_hash_value(mrb_state* mrb, mrb_value self, Packer& pk) {
   mrb_value keys = mrb_hash_keys(mrb, self);
-  int arena = mrb_gc_arena_save(mrb);
+  mrb_int arena_index = mrb_gc_arena_save(mrb);
   mrb_int n = RARRAY_LEN(keys);
   pk.pack_map(static_cast<uint32_t>(n));
   for (mrb_int i = 0; i < n; ++i) {
     mrb_value key = mrb_ary_ref(mrb, keys, i);
     mrb_msgpack_pack_value(mrb, key, pk);
     mrb_msgpack_pack_value(mrb, mrb_hash_get(mrb, self, key), pk);
-    mrb_gc_arena_restore(mrb, arena);
+    mrb_gc_arena_restore(mrb, arena_index);
   }
 }
 
 static mrb_value
 mrb_msgpack_get_ext_config(mrb_state* mrb, mrb_value obj)
 {
-  int arena_index;
+  mrb_int arena_index;
   mrb_value ext_type_classes;
   mrb_int classes_count;
 
@@ -148,7 +148,7 @@ mrb_msgpack_get_ext_config(mrb_state* mrb, mrb_value obj)
 
 template <typename Packer>
 static mrb_bool mrb_msgpack_pack_ext_value(mrb_state* mrb, mrb_value self, Packer& pk) {
-  int arena_index = mrb_gc_arena_save(mrb);
+  mrb_int arena_index = mrb_gc_arena_save(mrb);
 
   mrb_value ext_config = mrb_msgpack_get_ext_config(mrb, self);
   if (!mrb_hash_p(ext_config)) {
@@ -491,14 +491,12 @@ mrb_unpack_msgpack_obj(mrb_state* mrb, mrb_value data, const msgpack::object& ob
       return mrb_unpack_msgpack_obj_map(mrb, data, obj, referenced);
     case msgpack::type::EXT: {
         auto ext_type = obj.via.ext.type();
-        auto ext_data = obj.via.ext.data();
-        auto ext_size = obj.via.ext.size;
 
         mrb_value unpacker = mrb_hash_get(mrb,
             mrb_const_get(mrb, mrb_obj_value(mrb_module_get_id(mrb, MRB_SYM(MessagePack))), MRB_SYM(_ExtUnpackers)),
             mrb_int_value(mrb, ext_type));
         if (likely(mrb_type(unpacker) == MRB_TT_PROC)) {
-            return mrb_yield(mrb, unpacker, mrb_str_substr(mrb, data, ext_data - RSTRING_PTR(data), ext_size));
+            return mrb_yield(mrb, unpacker, mrb_str_substr(mrb, data, obj.via.ext.data() - RSTRING_PTR(data), obj.via.ext.size));
         } else {
           mrb_raisef(mrb, E_MSGPACK_ERROR, "Cannot unpack ext type %S", mrb_int_value(mrb, ext_type));
         }
@@ -508,52 +506,43 @@ mrb_unpack_msgpack_obj(mrb_state* mrb, mrb_value data, const msgpack::object& ob
   }
 }
 
-// --- Array ---
 static mrb_value
 mrb_unpack_msgpack_obj_array(mrb_state* mrb, mrb_value data, const msgpack::object& obj, bool referenced)
 {
   if (obj.via.array.size == 0) return mrb_ary_new(mrb);
 
   mrb_value ary = mrb_ary_new_capa(mrb, obj.via.array.size);
-  int arena = mrb_gc_arena_save(mrb);
+  mrb_int arena_index = mrb_gc_arena_save(mrb);
   const msgpack::object* ptr = obj.via.array.ptr;
   const msgpack::object* end = ptr + obj.via.array.size;
   for (; ptr < end; ++ptr) {
     mrb_ary_push(mrb, ary, mrb_unpack_msgpack_obj(mrb, data, *ptr, referenced));
-    mrb_gc_arena_restore(mrb, arena);
+    mrb_gc_arena_restore(mrb, arena_index);
   }
 
   return ary;
 }
 
-// --- Map ---
 static mrb_value
 mrb_unpack_msgpack_obj_map(mrb_state* mrb, mrb_value data, const msgpack::object& obj, bool referenced)
 {
   if (obj.via.map.size == 0) return mrb_hash_new(mrb);
 
   mrb_value hash = mrb_hash_new_capa(mrb, obj.via.map.size);
-  int arena = mrb_gc_arena_save(mrb);
+  mrb_int arena_index = mrb_gc_arena_save(mrb);
   const msgpack::object_kv* ptr = obj.via.map.ptr;
   const msgpack::object_kv* end = ptr + obj.via.map.size;
   for (; ptr < end; ++ptr) {
     mrb_value key = mrb_unpack_msgpack_obj(mrb, data, ptr->key, referenced);
     mrb_value val = mrb_unpack_msgpack_obj(mrb, data, ptr->val, referenced);
     mrb_hash_set(mrb, hash, key, val);
-    mrb_gc_arena_restore(mrb, arena);
+    mrb_gc_arena_restore(mrb, arena_index);
   }
   return hash;
 }
 
 bool my_reference_func(msgpack::type::object_type type, std::size_t length, void* user_data) {
-  switch (type) {
-    case msgpack::type::STR:
-    case msgpack::type::BIN:
-    case msgpack::type::EXT:
-      return true;
-    default:
-      return false;
-  }
+  return true;
 }
 
 MRB_API mrb_value
@@ -581,10 +570,10 @@ mrb_msgpack_unpack_m(mrb_state* mrb, mrb_value self)
   const char* buf = RSTRING_PTR(data);
   std::size_t len = RSTRING_LEN(data);
   std::size_t off = 0;
+  bool referenced = false;
 
   try {
     if (mrb_type(block) == MRB_TT_PROC) {
-      bool referenced = false;
       while (off < len) {
         try {
           msgpack::object_handle oh = msgpack::unpack(buf, len, off, referenced, my_reference_func);
@@ -593,12 +582,9 @@ mrb_msgpack_unpack_m(mrb_state* mrb, mrb_value self)
         catch (const msgpack::insufficient_bytes&) {
           break;
         }
-
       }
       return mrb_fixnum_value((mrb_int)off);
     } else {
-      std::size_t off = 0;
-      bool referenced = false;
       msgpack::object_handle oh = msgpack::unpack(buf, len, off, referenced, my_reference_func);
       return mrb_unpack_msgpack_obj(mrb, data, oh.get(), referenced);
     }
