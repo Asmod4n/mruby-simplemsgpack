@@ -24,26 +24,6 @@ extern "C" {
 #define unlikely(x) (x)
 #endif
 
-class mrb_string_buffer {
-  mrb_state* mrb;
-  mrb_value str;
-public:
-
-  mrb_string_buffer(mrb_state* mrb) : mrb(mrb)
-  {
-    this->str = mrb_str_new(mrb, nullptr, 0);
-  }
-
-  void write(const char* data, size_t size) {
-    mrb_str_cat(this->mrb, this->str, data, size);
-  }
-
-  mrb_value get()
-  {
-    return this->str;
-  }
-};
-
 template <typename Packer> static void mrb_msgpack_pack_value(mrb_state* mrb, mrb_value self, Packer& pk);
 template <typename Packer> static void mrb_msgpack_pack_array_value(mrb_state* mrb, mrb_value self, Packer& pk);
 template <typename Packer> static void mrb_msgpack_pack_hash_value(mrb_state* mrb, mrb_value self, Packer& pk);
@@ -238,10 +218,10 @@ static void mrb_msgpack_pack_value(mrb_state* mrb, mrb_value self, Packer& pk) {
 static mrb_value
 mrb_msgpack_pack_object(mrb_state* mrb, mrb_value self) {
   try {
-    mrb_string_buffer sbuf(mrb);
-    msgpack::packer<mrb_string_buffer> pk(&sbuf);
+    msgpack::sbuffer sbuf;
+    msgpack::packer<msgpack::sbuffer> pk(&sbuf);
     mrb_msgpack_pack_value(mrb, self, pk);
-    return sbuf.get();
+    return mrb_str_new(mrb, sbuf.data(), sbuf.size());
   } catch (const std::bad_alloc&) {
     mrb_exc_raise(mrb, mrb_obj_value(mrb->nomem_err));
   } catch (const std::exception& e) {
@@ -253,10 +233,10 @@ mrb_msgpack_pack_object(mrb_state* mrb, mrb_value self) {
 static mrb_value
 mrb_msgpack_pack_string(mrb_state* mrb, mrb_value self) {
   try {
-    mrb_string_buffer sbuf(mrb);
-    msgpack::packer<mrb_string_buffer> pk(&sbuf);
+    msgpack::sbuffer sbuf;
+    msgpack::packer<msgpack::sbuffer> pk(&sbuf);
     mrb_msgpack_pack_string_value(mrb, self, pk);
-    return sbuf.get();
+    return mrb_str_new(mrb, sbuf.data(), sbuf.size());
   } catch (const std::bad_alloc&) {
     mrb_exc_raise(mrb, mrb_obj_value(mrb->nomem_err));
   } catch (const std::exception& e) {
@@ -268,10 +248,10 @@ mrb_msgpack_pack_string(mrb_state* mrb, mrb_value self) {
 static mrb_value
 mrb_msgpack_pack_array(mrb_state* mrb, mrb_value self) {
   try {
-    mrb_string_buffer sbuf(mrb);
-    msgpack::packer<mrb_string_buffer> pk(&sbuf);
+    msgpack::sbuffer sbuf;
+    msgpack::packer<msgpack::sbuffer> pk(&sbuf);
     mrb_msgpack_pack_array_value(mrb, self, pk);
-    return sbuf.get();
+    return mrb_str_new(mrb, sbuf.data(), sbuf.size());
   } catch (const std::bad_alloc&) {
     mrb_exc_raise(mrb, mrb_obj_value(mrb->nomem_err));
   } catch (const std::exception& e) {
@@ -284,10 +264,10 @@ mrb_msgpack_pack_array(mrb_state* mrb, mrb_value self) {
 static mrb_value
 mrb_msgpack_pack_hash(mrb_state* mrb, mrb_value self) {
   try {
-    mrb_string_buffer sbuf(mrb);
-    msgpack::packer<mrb_string_buffer> pk(&sbuf);
+    msgpack::sbuffer sbuf;
+    msgpack::packer<msgpack::sbuffer> pk(&sbuf);
     mrb_msgpack_pack_hash_value(mrb, self, pk);
-    return sbuf.get();
+    return mrb_str_new(mrb, sbuf.data(), sbuf.size());
   } catch (const std::bad_alloc&) {
     mrb_exc_raise(mrb, mrb_obj_value(mrb->nomem_err));
   } catch (const std::exception& e) {
@@ -300,10 +280,10 @@ mrb_msgpack_pack_hash(mrb_state* mrb, mrb_value self) {
 static mrb_value
 mrb_msgpack_pack_float(mrb_state* mrb, mrb_value self) {
   try {
-    mrb_string_buffer sbuf(mrb);
-    msgpack::packer<mrb_string_buffer> pk(&sbuf);
+    msgpack::sbuffer sbuf;
+    msgpack::packer<msgpack::sbuffer> pk(&sbuf);
     mrb_msgpack_pack_float_value(mrb, self, pk);
-    return sbuf.get();
+    return mrb_str_new(mrb, sbuf.data(), sbuf.size());
   } catch (const std::bad_alloc&) {
     mrb_exc_raise(mrb, mrb_obj_value(mrb->nomem_err));
   } catch (const std::exception& e) {
@@ -316,10 +296,10 @@ mrb_msgpack_pack_float(mrb_state* mrb, mrb_value self) {
 static mrb_value
 mrb_msgpack_pack_integer(mrb_state* mrb, mrb_value self) {
   try {
-    mrb_string_buffer sbuf(mrb);
-    msgpack::packer<mrb_string_buffer> pk(&sbuf);
+    msgpack::sbuffer sbuf;
+    msgpack::packer<msgpack::sbuffer> pk(&sbuf);
     mrb_msgpack_pack_integer_value(mrb, self, pk);
-    return sbuf.get();
+    return mrb_str_new(mrb, sbuf.data(), sbuf.size());
   } catch (const std::bad_alloc&) {
     mrb_exc_raise(mrb, mrb_obj_value(mrb->nomem_err));
   } catch (const std::exception& e) {
@@ -331,10 +311,10 @@ mrb_msgpack_pack_integer(mrb_state* mrb, mrb_value self) {
 static mrb_value
 mrb_msgpack_pack_true(mrb_state* mrb, mrb_value self) {
   try {
-    mrb_string_buffer sbuf(mrb);
-    msgpack::packer<mrb_string_buffer> pk(&sbuf);
+    msgpack::sbuffer sbuf;
+    msgpack::packer<msgpack::sbuffer> pk(&sbuf);
     pk.pack_true();
-    return sbuf.get();
+    return mrb_str_new(mrb, sbuf.data(), sbuf.size());
   } catch (const std::bad_alloc&) {
     mrb_exc_raise(mrb, mrb_obj_value(mrb->nomem_err));
   } catch (const std::exception& e) {
@@ -346,10 +326,10 @@ mrb_msgpack_pack_true(mrb_state* mrb, mrb_value self) {
 static mrb_value
 mrb_msgpack_pack_false(mrb_state* mrb, mrb_value self) {
   try {
-    mrb_string_buffer sbuf(mrb);
-    msgpack::packer<mrb_string_buffer> pk(&sbuf);
+    msgpack::sbuffer sbuf;
+    msgpack::packer<msgpack::sbuffer> pk(&sbuf);
     pk.pack_false();
-    return sbuf.get();
+    return mrb_str_new(mrb, sbuf.data(), sbuf.size());
   } catch (const std::bad_alloc&) {
     mrb_exc_raise(mrb, mrb_obj_value(mrb->nomem_err));
   } catch (const std::exception& e) {
@@ -361,10 +341,10 @@ mrb_msgpack_pack_false(mrb_state* mrb, mrb_value self) {
 static mrb_value
 mrb_msgpack_pack_nil(mrb_state* mrb, mrb_value self) {
   try {
-    mrb_string_buffer sbuf(mrb);
-    msgpack::packer<mrb_string_buffer> pk(&sbuf);
+    msgpack::sbuffer sbuf;
+    msgpack::packer<msgpack::sbuffer> pk(&sbuf);
     pk.pack_nil();
-    return sbuf.get();
+    return mrb_str_new(mrb, sbuf.data(), sbuf.size());
   } catch (const std::bad_alloc&) {
     mrb_exc_raise(mrb, mrb_obj_value(mrb->nomem_err));
   } catch (const std::exception& e) {
@@ -378,10 +358,10 @@ MRB_API mrb_value
 mrb_msgpack_pack(mrb_state *mrb, mrb_value object)
 {
   try {
-    mrb_string_buffer sbuf(mrb);
-    msgpack::packer<mrb_string_buffer> pk(&sbuf);
+    msgpack::sbuffer sbuf;
+    msgpack::packer<msgpack::sbuffer> pk(&sbuf);
     mrb_msgpack_pack_value(mrb, object, pk);
-    return sbuf.get();
+    return mrb_str_new(mrb, sbuf.data(), sbuf.size());
   }
   catch (const std::exception &e) {
     mrb_raise(mrb, E_MSGPACK_ERROR, e.what());
@@ -393,12 +373,12 @@ MRB_API mrb_value
 mrb_msgpack_pack_argv(mrb_state *mrb, mrb_value *argv, mrb_int argv_len)
 {
   try {
-    mrb_string_buffer sbuf(mrb);
-    msgpack::packer<mrb_string_buffer> pk(&sbuf);
+    msgpack::sbuffer sbuf;
+    msgpack::packer<msgpack::sbuffer> pk(&sbuf);
     pk.pack_array(static_cast<uint32_t>(argv_len));
     for (mrb_int i = 0; i < argv_len; ++i)
       mrb_msgpack_pack_value(mrb, argv[i], pk);
-    return sbuf.get();
+    return mrb_str_new(mrb, sbuf.data(), sbuf.size());
   }
   catch (const std::exception &e) {
     mrb_raise(mrb, E_MSGPACK_ERROR, e.what());
@@ -542,7 +522,14 @@ mrb_unpack_msgpack_obj_map(mrb_state* mrb, mrb_value data, const msgpack::object
 }
 
 bool my_reference_func(msgpack::type::object_type type, std::size_t length, void* user_data) {
-  return true;
+  switch(type) {
+    case msgpack::type::BIN:
+    case msgpack::type::EXT:
+    case msgpack::type::STR:
+      return true;
+    default:
+      return false;
+  }
 }
 
 MRB_API mrb_value
