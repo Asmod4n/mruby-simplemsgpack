@@ -150,14 +150,14 @@ assert("MessagePack.register_unpack_type") do
 end
 
 assert("Class#to_msgpack with registered ext type") do
-  MessagePack.register_pack_type(0, Class) { |mod| mod.to_s }
-  MessagePack.register_unpack_type(0) { |data| data.constantize }
+  MessagePack.register_pack_type(1, Class) { |mod| mod.to_s }
+  MessagePack.register_unpack_type(1) { |data| data.constantize }
   assert_equal(MessagePack::Error, MessagePack.unpack(MessagePack::Error.to_msgpack))
 end
 
 assert("Registered ext type for one of the core types is ignored") do
-  MessagePack.register_pack_type(0, Array) { |array| nil }
-  MessagePack.register_unpack_type(0) { |data| nil }
+  MessagePack.register_pack_type(1, Array) { |array| nil }
+  MessagePack.register_unpack_type(1) { |data| nil }
   assert_equal(['item'], MessagePack.unpack(['item'].to_msgpack))
 end
 
@@ -177,8 +177,8 @@ assert("Extension types are inherited") do
 
   class InheritsTest < Test; end
 
-  MessagePack.register_pack_type(0, Test) { |test| test.class.to_s + '#' + test.id }
-  MessagePack.register_unpack_type(0) do |data|
+  MessagePack.register_pack_type(1, Test) { |test| test.class.to_s + '#' + test.id }
+  MessagePack.register_unpack_type(1) do |data|
     class_name, id = data.split('#')
     class_name.constantize.new(id)
   end
@@ -189,12 +189,12 @@ end
 
 assert("Extension types for modules") do
   module Mod; end
-  MessagePack.register_pack_type(0, Mod) { |obj| 'packed' }
+  MessagePack.register_pack_type(1, Mod) { |obj| 'packed' }
 
   class Cls; include Mod end
-  assert_equal(Cls.new.to_msgpack, "\xc7\x06\x00packed")
+  assert_equal(Cls.new.to_msgpack, "\xc7\x06\x01packed")
 
-  assert_equal(Object.new.extend(Mod).to_msgpack, "\xc7\x06\x00packed")
+  assert_equal(Object.new.extend(Mod).to_msgpack, "\xc7\x06\x01packed")
 end
 
 assert("C Packing and unpacking") do

@@ -33,7 +33,7 @@ mrb_mruby_simplemsgpack_gem_test(mrb_state *mrb)
 
 #ifdef MRB_MSGPACK_SYMBOLS
 #ifndef MRB_MSGPACK_SYMBOLS_EXT
-#define MRB_MSGPACK_SYMBOLS_EXT 1
+#define MRB_MSGPACK_SYMBOLS_EXT 0
 #endif
   mrb_define_const(mrb, msgpack_test,
                    "SYMBOLS_ENABLED",

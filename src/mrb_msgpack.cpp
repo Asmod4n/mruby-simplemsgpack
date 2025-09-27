@@ -70,7 +70,7 @@ static inline void mrb_msgpack_pack_string_value(mrb_state *mrb, mrb_value self,
 #ifdef MRB_MSGPACK_SYMBOLS
 
 #ifndef MRB_MSGPACK_SYMBOLS_EXT
-#define MRB_MSGPACK_SYMBOLS_EXT 1
+#define MRB_MSGPACK_SYMBOLS_EXT 0
 #endif
 
 template <typename Packer>
