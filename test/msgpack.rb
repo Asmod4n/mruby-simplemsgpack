@@ -35,9 +35,26 @@ assert("String#to_msgpack") do
   assert_equal("😎", MessagePack.unpack("😎".to_msgpack))
 end
 
-assert("Symbol#to_msgpack") do
-  assert_equal('symbol', MessagePack.unpack(:symbol.to_msgpack))
-  assert_equal('symbol', MessagePack.unpack(MessagePack.pack(:symbol)))
+if MessagePackTest::SYMBOLS_ENABLED
+  assert("Symbol#to_msgpack MRB_MSGPACK_SYMBOLS") do
+    assert_equal(:symbol, MessagePack.unpack(:symbol.to_msgpack))
+    assert_equal(:symbol, MessagePack.unpack(MessagePack.pack(:symbol)))
+  end
+else
+  assert("Symbol#to_msgpack") do
+    assert_equal('symbol', MessagePack.unpack(:symbol.to_msgpack))
+    assert_equal('symbol', MessagePack.unpack(MessagePack.pack(:symbol)))
+  end
+
+  assert("Symbol#to_msgpack with registered ext type") do
+    MessagePack.register_pack_type(0, Symbol) { |symbol| symbol.to_s }
+    MessagePack.register_unpack_type(0) { |data| data.to_sym }
+    assert_equal(:symbol, MessagePack.unpack(:symbol.to_msgpack))
+
+    hash = { key: 123, nested: [:array] }
+    assert_equal(hash, MessagePack.unpack(hash.to_msgpack))
+    assert_equal(hash, MessagePack.unpack(MessagePack.pack(hash)))
+  end
 end
 
 assert("Array#to_msgpack") do
@@ -98,20 +115,22 @@ assert("MessagePack.unpack with block") do
   assert_equal(unpacked, [value1, value2, value3])
 end
 
+class TestClassFoo; end
+
 assert("MessagePack.register_pack_type") do
   assert_raise(RangeError, "ext type out of range") do
-    MessagePack.register_pack_type(-1, Symbol)
+    MessagePack.register_pack_type(-1, TestClassFoo)
   end
 
   assert_raise(RangeError, "ext type out of range") do
-    MessagePack.register_pack_type(128, Symbol)
+    MessagePack.register_pack_type(128, TestClassFoo)
   end
 
   assert_raise(ArgumentError, "no block given") do
-    MessagePack.register_pack_type(1, Symbol)
+    MessagePack.register_pack_type(127, TestClassFoo)
   end
 
-  assert_nil(MessagePack.register_pack_type(1, Symbol) {})
+  assert_nil(MessagePack.register_pack_type(127, TestClassFoo) {})
 end
 
 assert("MessagePack.register_unpack_type") do
@@ -124,20 +143,10 @@ assert("MessagePack.register_unpack_type") do
   end
 
   assert_raise(ArgumentError, "no block given") do
-    MessagePack.register_unpack_type(1)
+    MessagePack.register_unpack_type(127)
   end
 
-  assert_nil(MessagePack.register_unpack_type(1) {})
-end
-
-assert("Symbol#to_msgpack with registered ext type") do
-  MessagePack.register_pack_type(0, Symbol) { |symbol| symbol.to_s }
-  MessagePack.register_unpack_type(0) { |data| data.to_sym }
-  assert_equal(:symbol, MessagePack.unpack(:symbol.to_msgpack))
-
-  hash = { key: 123, nested: [:array] }
-  assert_equal(hash, MessagePack.unpack(hash.to_msgpack))
-  assert_equal(hash, MessagePack.unpack(MessagePack.pack(hash)))
+  assert_nil(MessagePack.register_unpack_type(127) {})
 end
 
 assert("Class#to_msgpack with registered ext type") do
@@ -152,12 +161,6 @@ assert("Registered ext type for one of the core types is ignored") do
   assert_equal(['item'], MessagePack.unpack(['item'].to_msgpack))
 end
 
-assert("Unknown Ext Type raises a Exception when tried to unpack") do
-  assert_raise(MessagePack::Error) do
-    MessagePack.register_pack_type(50, Symbol) { |symbol| symbol.to_s }
-    MessagePack.unpack(:hallo.to_msgpack)
-  end
-end
 
 assert("Extension types are inherited") do
   class Test

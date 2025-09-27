@@ -1,4 +1,3 @@
-// mruby-simplemsgpack C++ packer wrapper (msgpack::packer + msgpack::sbuffer)
 #define MSGPACK_NO_BOOST
 #define MSGPACK_DEFAULT_API_VERSION 3
 #include <msgpack.hpp>
@@ -67,6 +66,37 @@ static inline void mrb_msgpack_pack_string_value(mrb_state *mrb, mrb_value self,
     pk.pack_bin_body(ptr, static_cast<size_t>(len));
   }
 }
+
+#ifdef MRB_MSGPACK_SYMBOLS
+
+#ifndef MRB_MSGPACK_SYMBOLS_EXT
+#define MRB_MSGPACK_SYMBOLS_EXT 1
+#endif
+
+template <typename Packer>
+static inline void
+mrb_msgpack_pack_symbol_value(mrb_state* mrb, mrb_value self, Packer& pk)
+{
+  mrb_sym sym = mrb_symbol(self);
+
+#ifdef MRB_MSGPACK_SYMBOLS_AS_INT
+  // Pack the raw mrb_sym value as the ext body
+  pk.pack_ext(sizeof(sym), static_cast<int8_t>(MRB_MSGPACK_SYMBOLS_EXT));
+  pk.pack_ext_body(reinterpret_cast<const char*>(&sym), sizeof(sym));
+
+#else
+  // Pack the symbol’s name as the ext body, using mrb_sym_name_len
+  mrb_int len;
+  const char* name = mrb_sym_name_len(mrb, sym, &len);
+
+  pk.pack_ext(static_cast<uint32_t>(len),
+              static_cast<int8_t>(MRB_MSGPACK_SYMBOLS_EXT));
+  pk.pack_ext_body(name, static_cast<size_t>(len));
+
+#endif
+}
+
+#endif // MRB_MSGPACK_SYMBOLS
 
 template <typename Packer>
 static void mrb_msgpack_pack_array_value(mrb_state* mrb, mrb_value self, Packer& pk) {
@@ -197,6 +227,11 @@ static void mrb_msgpack_pack_value(mrb_state* mrb, mrb_value self, Packer& pk) {
     case MRB_TT_STRING:
       mrb_msgpack_pack_string_value(mrb, self, pk);
       break;
+#ifdef MRB_MSGPACK_SYMBOLS
+    case MRB_TT_SYMBOL:
+      mrb_msgpack_pack_symbol_value(mrb, self, pk);
+      break;
+#endif
     default: {
       if (mrb_msgpack_pack_ext_value(mrb, self, pk)) break;
 
@@ -249,6 +284,27 @@ mrb_msgpack_pack_string(mrb_state* mrb, mrb_value self) {
   }
   return mrb_nil_value();
 }
+
+#ifdef MRB_MSGPACK_SYMBOLS
+
+static mrb_value
+mrb_msgpack_pack_symbol(mrb_state* mrb, mrb_value self) {
+  try {
+    msgpack::sbuffer sbuf;
+    msgpack::packer<msgpack::sbuffer> pk(&sbuf);
+    mrb_msgpack_pack_symbol_value(mrb, self, pk);
+    return mrb_str_new(mrb, sbuf.data(), sbuf.size());
+  } catch (const std::bad_alloc&) {
+    mrb_exc_raise(mrb, mrb_obj_value(mrb->nomem_err));
+  } catch (const std::exception& e) {
+    mrb_raisef(mrb, E_MSGPACK_ERROR,
+               "cannot pack symbol: %S",
+               mrb_str_new_cstr(mrb, e.what()));
+  }
+  return mrb_nil_value();
+}
+
+#endif // MRB_MSGPACK_SYMBOLS
 
 static mrb_value
 mrb_msgpack_pack_array(mrb_state* mrb, mrb_value self) {
@@ -420,6 +476,13 @@ mrb_msgpack_register_pack_type(mrb_state* mrb, mrb_value self)
         mrb_raise(mrb, E_TYPE_ERROR, "not a block");
     }
 
+#ifdef MRB_MSGPACK_SYMBOLS
+    // Prevent registering ext packers for Symbol when built-in symbol packing is enabled
+    if (mrb_class_ptr(mrb_class) == mrb->symbol_class) {
+      mrb_raise(mrb, E_ARGUMENT_ERROR, "cannot register ext packer for Symbol when MRB_MSGPACK_SYMBOLS is enabled");
+    }
+#endif
+
     ext_packers = mrb_const_get(mrb, self, MRB_SYM(_ExtPackers));
     ext_config = mrb_hash_new_capa(mrb, 2);
     mrb_hash_set(mrb, ext_config, mrb_symbol_value(MRB_SYM(type)), mrb_int_value(mrb, type));
@@ -476,7 +539,25 @@ mrb_unpack_msgpack_obj(mrb_state* mrb, const msgpack::object& obj)
       return mrb_unpack_msgpack_obj_map(mrb, obj);
     case msgpack::type::EXT: {
         auto ext_type = obj.via.ext.type();
-
+#ifdef MRB_MSGPACK_SYMBOLS
+        if (ext_type == MRB_MSGPACK_SYMBOLS_EXT) {
+# ifdef MRB_MSGPACK_SYMBOLS_AS_INT
+            // Body is a raw mrb_sym
+            if (unlikely(obj.via.ext.size != sizeof(mrb_sym))) {
+              mrb_raise(mrb, E_MSGPACK_ERROR, "invalid symbol ext body size");
+            }
+            mrb_sym sym;
+            std::memcpy(&sym, obj.via.ext.data(), sizeof(sym));
+            return mrb_symbol_value(sym);
+# else
+            // Body is the UTF‑8 symbol name
+            return mrb_symbol_value(
+                mrb_intern(mrb,
+                                obj.via.ext.data(),
+                                (size_t)obj.via.ext.size));
+# endif
+        }
+#endif // MRB_MSGPACK_SYMBOLS
         mrb_value unpacker = mrb_hash_get(mrb,
             mrb_const_get(mrb, mrb_obj_value(mrb_module_get_id(mrb, MRB_SYM(MessagePack))), MRB_SYM(_ExtUnpackers)),
             mrb_int_value(mrb, ext_type));
@@ -733,6 +814,14 @@ mrb_msgpack_register_unpack_type(mrb_state* mrb, mrb_value self)
         mrb_raise(mrb, E_TYPE_ERROR, "not a block");
     }
 
+#ifdef MRB_MSGPACK_SYMBOLS
+    /* Prevent registering an unpacker for the reserved symbol ext type */
+    if (type == MRB_MSGPACK_SYMBOLS_EXT) {
+      mrb_raise(mrb, E_ARGUMENT_ERROR,
+                "cannot register unpacker for Symbol ext type when MRB_MSGPACK_SYMBOLS is enabled");
+    }
+#endif
+
     mrb_hash_set(mrb, mrb_const_get(mrb, self, MRB_SYM(_ExtUnpackers)), mrb_int_value(mrb, type), block);
 
     return mrb_nil_value();
@@ -751,40 +840,45 @@ MRB_BEGIN_DECL
 void
 mrb_mruby_simplemsgpack_gem_init(mrb_state* mrb)
 {
-    struct RClass* msgpack_mod, *mrb_object_handle_class;
+  struct RClass *msgpack_mod, *mrb_object_handle_class;
 
-    mrb_define_method(mrb, mrb->object_class, "to_msgpack", mrb_msgpack_pack_object, MRB_ARGS_NONE());
-    mrb_define_method(mrb, mrb->string_class, "to_msgpack", mrb_msgpack_pack_string, MRB_ARGS_NONE());
-    mrb_define_method(mrb, mrb->array_class, "to_msgpack", mrb_msgpack_pack_array, MRB_ARGS_NONE());
-    mrb_define_method(mrb, mrb->hash_class, "to_msgpack", mrb_msgpack_pack_hash, MRB_ARGS_NONE());
-#ifndef MRB_WITHOUT_FLOAT
-    mrb_define_method(mrb, mrb->float_class, "to_msgpack", mrb_msgpack_pack_float, MRB_ARGS_NONE());
+  mrb_define_method_id(mrb, mrb->object_class,  MRB_SYM(to_msgpack), mrb_msgpack_pack_object,  MRB_ARGS_NONE());
+  mrb_define_method_id(mrb, mrb->string_class,  MRB_SYM(to_msgpack), mrb_msgpack_pack_string,  MRB_ARGS_NONE());
+#ifdef MRB_MSGPACK_SYMBOLS
+  mrb_define_method_id(mrb, mrb->symbol_class,  MRB_SYM(to_msgpack), mrb_msgpack_pack_symbol,  MRB_ARGS_NONE());
 #endif
-    mrb_define_method(mrb, mrb->integer_class, "to_msgpack", mrb_msgpack_pack_integer, MRB_ARGS_NONE());
-    mrb_define_method(mrb, mrb->true_class, "to_msgpack", mrb_msgpack_pack_true, MRB_ARGS_NONE());
-    mrb_define_method(mrb, mrb->false_class, "to_msgpack", mrb_msgpack_pack_false, MRB_ARGS_NONE());
-    mrb_define_method(mrb, mrb->nil_class, "to_msgpack", mrb_msgpack_pack_nil, MRB_ARGS_NONE());
-    msgpack_mod = mrb_define_module(mrb, "MessagePack");
-    mrb_define_class_under(mrb, msgpack_mod, "Error", E_RUNTIME_ERROR);
-    mrb_object_handle_class = mrb_define_class_under(mrb, msgpack_mod, "ObjectHandle", mrb->object_class);
-    MRB_SET_INSTANCE_TT(mrb_object_handle_class, MRB_TT_DATA);
-    mrb_define_method(mrb, mrb_object_handle_class, "initialize", mrb_msgpack_object_handle_new, MRB_ARGS_REQ(1));
-    mrb_define_method(mrb, mrb_object_handle_class, "value", mrb_msgpack_object_handle_value, MRB_ARGS_NONE());
-    mrb_define_method(mrb, mrb_object_handle_class, "at_pointer", mrb_msgpack_object_handle_at_pointer, MRB_ARGS_REQ(1));
+  mrb_define_method_id(mrb, mrb->array_class,   MRB_SYM(to_msgpack), mrb_msgpack_pack_array,   MRB_ARGS_NONE());
+  mrb_define_method_id(mrb, mrb->hash_class,    MRB_SYM(to_msgpack), mrb_msgpack_pack_hash,    MRB_ARGS_NONE());
+#ifndef MRB_WITHOUT_FLOAT
+  mrb_define_method_id(mrb, mrb->float_class,   MRB_SYM(to_msgpack), mrb_msgpack_pack_float,   MRB_ARGS_NONE());
+#endif
+  mrb_define_method_id(mrb, mrb->integer_class, MRB_SYM(to_msgpack), mrb_msgpack_pack_integer, MRB_ARGS_NONE());
+  mrb_define_method_id(mrb, mrb->true_class,    MRB_SYM(to_msgpack), mrb_msgpack_pack_true,    MRB_ARGS_NONE());
+  mrb_define_method_id(mrb, mrb->false_class,   MRB_SYM(to_msgpack), mrb_msgpack_pack_false,   MRB_ARGS_NONE());
+  mrb_define_method_id(mrb, mrb->nil_class,     MRB_SYM(to_msgpack), mrb_msgpack_pack_nil,     MRB_ARGS_NONE());
 
+  msgpack_mod = mrb_define_module_id(mrb, MRB_SYM(MessagePack));
+  mrb_define_class_under_id(mrb, msgpack_mod, MRB_SYM(Error), E_RUNTIME_ERROR);
 
-    mrb_define_const(mrb, msgpack_mod, "LibMsgPackCVersion", mrb_str_new_lit(mrb, MSGPACK_VERSION));
-    mrb_define_const(mrb, msgpack_mod, "_ExtPackers", mrb_hash_new(mrb));
-    mrb_define_const(mrb, msgpack_mod, "_ExtUnpackers", mrb_hash_new(mrb));
+  mrb_object_handle_class = mrb_define_class_under_id(mrb, msgpack_mod, MRB_SYM(ObjectHandle), mrb->object_class);
+  MRB_SET_INSTANCE_TT(mrb_object_handle_class, MRB_TT_DATA);
+  mrb_define_method_id(mrb, mrb_object_handle_class, MRB_SYM(initialize),  mrb_msgpack_object_handle_new,         MRB_ARGS_REQ(1));
+  mrb_define_method_id(mrb, mrb_object_handle_class, MRB_SYM(value),       mrb_msgpack_object_handle_value,       MRB_ARGS_NONE());
+  mrb_define_method_id(mrb, mrb_object_handle_class, MRB_SYM(at_pointer),  mrb_msgpack_object_handle_at_pointer,  MRB_ARGS_REQ(1));
 
-    mrb_define_module_function(mrb, msgpack_mod, "pack", mrb_msgpack_pack_m, MRB_ARGS_REQ(1));
-    mrb_define_module_function(mrb, msgpack_mod, "register_pack_type", mrb_msgpack_register_pack_type, (MRB_ARGS_REQ(2)|MRB_ARGS_BLOCK()));
-    mrb_define_module_function(mrb, msgpack_mod, "ext_packer_registered?", mrb_msgpack_ext_packer_registered, MRB_ARGS_REQ(1));
-    mrb_define_module_function(mrb, msgpack_mod, "unpack", mrb_msgpack_unpack_m, (MRB_ARGS_REQ(1)|MRB_ARGS_BLOCK()));
-    mrb_define_module_function(mrb, msgpack_mod, "unpack_lazy", mrb_msgpack_unpack_lazy_m, (MRB_ARGS_REQ(1)));
-    mrb_define_module_function(mrb, msgpack_mod, "register_unpack_type", mrb_msgpack_register_unpack_type, (MRB_ARGS_REQ(1)|MRB_ARGS_BLOCK()));
-    mrb_define_module_function(mrb, msgpack_mod, "ext_unpacker_registered?", mrb_msgpack_ext_unpacker_registered, MRB_ARGS_REQ(1));
+  mrb_define_const_id(mrb, msgpack_mod, MRB_SYM(LibMsgPackCVersion), mrb_str_new_lit(mrb, MSGPACK_VERSION));
+  mrb_define_const_id(mrb, msgpack_mod, MRB_SYM(_ExtPackers),        mrb_hash_new(mrb));
+  mrb_define_const_id(mrb, msgpack_mod, MRB_SYM(_ExtUnpackers),      mrb_hash_new(mrb));
+
+  mrb_define_module_function_id(mrb, msgpack_mod, MRB_SYM(pack),                     mrb_msgpack_pack_m,               MRB_ARGS_REQ(1));
+  mrb_define_module_function_id(mrb, msgpack_mod, MRB_SYM(register_pack_type),       mrb_msgpack_register_pack_type,   (MRB_ARGS_REQ(2)|MRB_ARGS_BLOCK()));
+  mrb_define_module_function_id(mrb, msgpack_mod, MRB_SYM_Q(ext_packer_registered),  mrb_msgpack_ext_packer_registered, MRB_ARGS_REQ(1));
+  mrb_define_module_function_id(mrb, msgpack_mod, MRB_SYM(unpack),                   mrb_msgpack_unpack_m,             (MRB_ARGS_REQ(1)|MRB_ARGS_BLOCK()));
+  mrb_define_module_function_id(mrb, msgpack_mod, MRB_SYM(unpack_lazy),              mrb_msgpack_unpack_lazy_m,        MRB_ARGS_REQ(1));
+  mrb_define_module_function_id(mrb, msgpack_mod, MRB_SYM(register_unpack_type),     mrb_msgpack_register_unpack_type, (MRB_ARGS_REQ(1)|MRB_ARGS_BLOCK()));
+  mrb_define_module_function_id(mrb, msgpack_mod, MRB_SYM_Q(ext_unpacker_registered), mrb_msgpack_ext_unpacker_registered, MRB_ARGS_REQ(1));
 }
 
-void mrb_mruby_simplemsgpack_gem_final(mrb_state* mrb) {}
+void
+mrb_mruby_simplemsgpack_gem_final(mrb_state* mrb) {}
 MRB_END_DECL
