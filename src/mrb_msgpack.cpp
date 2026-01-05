@@ -1,8 +1,7 @@
-// mruby-simplemsgpack C++ packer wrapper (msgpack::packer + msgpack::sbuffer)
 #define MSGPACK_NO_BOOST
 #define MSGPACK_DEFAULT_API_VERSION 3
 #include <msgpack.hpp>
-extern "C" {
+
 #include <mruby.h>
 #include <mruby/array.h>
 #include <mruby/class.h>
@@ -14,9 +13,10 @@ extern "C" {
 #include <mruby/string_is_utf8.h>
 #include <mruby/presym.h>
 #include <mruby/msgpack.h>
+MRB_BEGIN_DECL
 #include <mruby/internal.h>
+MRB_END_DECL
 #include <mruby/gc.h>
-}
 #include <mruby/cpp_helpers.hpp>
 #include <mruby/num_helpers.hpp>
 #include <string>
@@ -68,6 +68,37 @@ static inline void mrb_msgpack_pack_string_value(mrb_state *mrb, mrb_value self,
     pk.pack_bin_body(ptr, static_cast<size_t>(len));
   }
 }
+
+#ifdef MRB_MSGPACK_SYMBOLS
+
+#ifndef MRB_MSGPACK_SYMBOLS_EXT
+#define MRB_MSGPACK_SYMBOLS_EXT 0
+#endif
+
+template <typename Packer>
+static inline void
+mrb_msgpack_pack_symbol_value(mrb_state* mrb, mrb_value self, Packer& pk)
+{
+  mrb_sym sym = mrb_symbol(self);
+
+#ifdef MRB_MSGPACK_SYMBOLS_AS_INT
+  // Pack the raw mrb_sym value as the ext body
+  pk.pack_ext(sizeof(sym), static_cast<int8_t>(MRB_MSGPACK_SYMBOLS_EXT));
+  pk.pack_ext_body(reinterpret_cast<const char*>(&sym), sizeof(sym));
+
+#else
+  // Pack the symbol’s name as the ext body, using mrb_sym_name_len
+  mrb_int len;
+  const char* name = mrb_sym_name_len(mrb, sym, &len);
+
+  pk.pack_ext(static_cast<uint32_t>(len),
+              static_cast<int8_t>(MRB_MSGPACK_SYMBOLS_EXT));
+  pk.pack_ext_body(name, static_cast<size_t>(len));
+
+#endif
+}
+
+#endif // MRB_MSGPACK_SYMBOLS
 
 template <typename Packer>
 static void mrb_msgpack_pack_array_value(mrb_state* mrb, mrb_value self, Packer& pk) {
@@ -226,6 +257,11 @@ static void mrb_msgpack_pack_value(mrb_state* mrb, mrb_value self, Packer& pk) {
     case MRB_TT_STRING:
       mrb_msgpack_pack_string_value(mrb, self, pk);
       break;
+#ifdef MRB_MSGPACK_SYMBOLS
+    case MRB_TT_SYMBOL:
+      mrb_msgpack_pack_symbol_value(mrb, self, pk);
+      break;
+#endif
     default: {
       if (mrb_msgpack_pack_ext_value(mrb, self, pk)) break;
 
@@ -359,6 +395,13 @@ mrb_msgpack_register_pack_type(mrb_state* mrb, mrb_value self)
         mrb_raise(mrb, E_TYPE_ERROR, "not a block");
     }
 
+#ifdef MRB_MSGPACK_SYMBOLS
+    // Prevent registering ext packers for Symbol when built-in symbol packing is enabled
+    if (mrb_class_ptr(mrb_class) == mrb->symbol_class) {
+      mrb_raise(mrb, E_ARGUMENT_ERROR, "cannot register ext packer for Symbol when MRB_MSGPACK_SYMBOLS is enabled");
+    }
+#endif
+
     ext_packers = mrb_const_get(mrb, self, MRB_SYM(_ExtPackers));
     ext_config = mrb_hash_new_capa(mrb, 2);
     mrb_hash_set(mrb, ext_config, mrb_symbol_value(MRB_SYM(type)), mrb_int_value(mrb, type));
@@ -409,8 +452,26 @@ mrb_unpack_msgpack_obj(mrb_state* mrb, const msgpack::object& obj)
     case msgpack::type::MAP:
       return mrb_unpack_msgpack_obj_map(mrb, obj);
     case msgpack::type::EXT: {
-        mrb_value ext_type = mrb_int_value(mrb, obj.via.ext.type());
-
+        auto ext_type = mrb_convert_number(mrb, obj.via.ext.type());
+#ifdef MRB_MSGPACK_SYMBOLS
+        if (ext_type == MRB_MSGPACK_SYMBOLS_EXT) {
+# ifdef MRB_MSGPACK_SYMBOLS_AS_INT
+            // Body is a raw mrb_sym
+            if (unlikely(obj.via.ext.size != sizeof(mrb_sym))) {
+              mrb_raise(mrb, E_MSGPACK_ERROR, "invalid symbol ext body size");
+            }
+            mrb_sym sym;
+            std::memcpy(&sym, obj.via.ext.data(), sizeof(sym));
+            return mrb_symbol_value(sym);
+# else
+            // Body is the UTF‑8 symbol name
+            return mrb_symbol_value(
+                mrb_intern(mrb,
+                                obj.via.ext.data(),
+                                (size_t)obj.via.ext.size));
+# endif
+        }
+#endif // MRB_MSGPACK_SYMBOLS
         mrb_value unpacker = mrb_hash_get(mrb,
             mrb_const_get(mrb, mrb_obj_value(mrb_module_get_id(mrb, MRB_SYM(MessagePack))), MRB_SYM(_ExtUnpackers)), ext_type);
         if (likely(mrb_type(unpacker) == MRB_TT_PROC)) {
@@ -665,6 +726,14 @@ mrb_msgpack_register_unpack_type(mrb_state* mrb, mrb_value self)
     if (mrb_type(block) != MRB_TT_PROC) {
         mrb_raise(mrb, E_TYPE_ERROR, "not a block");
     }
+
+#ifdef MRB_MSGPACK_SYMBOLS
+    /* Prevent registering an unpacker for the reserved symbol ext type */
+    if (type == MRB_MSGPACK_SYMBOLS_EXT) {
+      mrb_raise(mrb, E_ARGUMENT_ERROR,
+                "cannot register unpacker for Symbol ext type when MRB_MSGPACK_SYMBOLS is enabled");
+    }
+#endif
 
     mrb_hash_set(mrb, mrb_const_get(mrb, self, MRB_SYM(_ExtUnpackers)), mrb_int_value(mrb, type), block);
 
