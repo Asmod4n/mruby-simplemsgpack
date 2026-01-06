@@ -119,10 +119,9 @@ static void mrb_msgpack_pack_hash_value(mrb_state* mrb, mrb_value self, Packer& 
   mrb_int arena_index = mrb_gc_arena_save(mrb);
 
   struct Ctx {
-    mrb_state* mrb;
     Packer* pk;
     mrb_int arena_index;
-  } ctx{mrb, &pk, arena_index};
+  } ctx{&pk, arena_index};
 
   mrb_hash_foreach(mrb, mrb_hash_ptr(self),
     [](mrb_state* mrb, mrb_value key, mrb_value val, void* data) -> int {
@@ -438,11 +437,9 @@ mrb_unpack_msgpack_obj(mrb_state* mrb, const msgpack::object& obj)
       return mrb_convert_number(mrb, obj.via.u64);
     case msgpack::type::NEGATIVE_INTEGER:
       return mrb_convert_number(mrb, obj.via.i64);
-#ifndef MRB_WITHOUT_FLOAT
     case msgpack::type::FLOAT32:
     case msgpack::type::FLOAT64:
       return mrb_convert_number(mrb, obj.via.f64);
-#endif
     case msgpack::type::STR:
       return mrb_str_new(mrb, obj.via.str.ptr, obj.via.str.size);
     case msgpack::type::BIN:
@@ -452,7 +449,7 @@ mrb_unpack_msgpack_obj(mrb_state* mrb, const msgpack::object& obj)
     case msgpack::type::MAP:
       return mrb_unpack_msgpack_obj_map(mrb, obj);
     case msgpack::type::EXT: {
-        auto ext_type = mrb_convert_number(mrb, obj.via.ext.type());
+        auto ext_type = obj.via.ext.type();
 #ifdef MRB_MSGPACK_SYMBOLS
         if (ext_type == MRB_MSGPACK_SYMBOLS_EXT) {
 # ifdef MRB_MSGPACK_SYMBOLS_AS_INT
@@ -473,7 +470,7 @@ mrb_unpack_msgpack_obj(mrb_state* mrb, const msgpack::object& obj)
         }
 #endif // MRB_MSGPACK_SYMBOLS
         mrb_value unpacker = mrb_hash_get(mrb,
-            mrb_const_get(mrb, mrb_obj_value(mrb_module_get_id(mrb, MRB_SYM(MessagePack))), MRB_SYM(_ExtUnpackers)), ext_type);
+            mrb_const_get(mrb, mrb_obj_value(mrb_module_get_id(mrb, MRB_SYM(MessagePack))), MRB_SYM(_ExtUnpackers)), mrb_convert_number(mrb, ext_type));
         if (likely(mrb_type(unpacker) == MRB_TT_PROC)) {
             return mrb_yield(mrb, unpacker, mrb_str_new(mrb, obj.via.ext.data(), obj.via.ext.size));
         } else {
@@ -588,9 +585,10 @@ mrb_msgpack_object_handle_new(mrb_state *mrb, mrb_value self)
 static mrb_value
 mrb_msgpack_object_handle_value(mrb_state *mrb, mrb_value self)
 {
-  msgpack_object_handle* handle = static_cast<msgpack_object_handle*>(DATA_PTR(self));
+  msgpack_object_handle* handle = static_cast<msgpack_object_handle*>(mrb_data_get_ptr(mrb, self, &msgpack_object_handle_type));
   if (unlikely(!handle)) {
     mrb_raise(mrb, E_MSGPACK_ERROR, "ObjectHandle is not initialized");
+    return mrb_undef_value();
   }
   return mrb_unpack_msgpack_obj(mrb, handle->oh.get());
 }
@@ -604,7 +602,11 @@ mrb_msgpack_unpack_lazy_m(mrb_state *mrb, mrb_value self)
 
   try {
     mrb_value object_handle = mrb_obj_new(mrb, mrb_class_get_under_id(mrb, mrb_class_ptr(self), MRB_SYM(ObjectHandle)), 1, &data);
-    msgpack_object_handle* handle = static_cast<msgpack_object_handle*>(DATA_PTR(object_handle));
+    msgpack_object_handle* handle = static_cast<msgpack_object_handle*>(mrb_data_get_ptr(mrb, object_handle, &msgpack_object_handle_type));
+    if (unlikely(!handle)) {
+      mrb_raise(mrb, E_MSGPACK_ERROR, "ObjectHandle is not initialized");
+      return mrb_undef_value();
+    }
     msgpack::unpack(handle->oh, RSTRING_PTR(data), RSTRING_LEN(data), handle->off);
 
     return object_handle;
@@ -636,7 +638,7 @@ mrb_msgpack_object_handle_at_pointer(mrb_state *mrb, mrb_value self)
     mrb_get_args(mrb, "S", &str);
     std::string_view pointer(RSTRING_PTR(str), RSTRING_LEN(str));
 
-    auto *handle = static_cast<msgpack_object_handle*>(DATA_PTR(self));
+    msgpack_object_handle *handle = static_cast<msgpack_object_handle*>(mrb_data_get_ptr(mrb, self, &msgpack_object_handle_type));
     if (unlikely(!handle)) {
         mrb_raise(mrb, E_MSGPACK_ERROR, "ObjectHandle is not initialized");
         return mrb_undef_value();
