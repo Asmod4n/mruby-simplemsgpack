@@ -43,6 +43,10 @@ MRuby::Gem::Specification.new('mruby-simplemsgpack') do |spec|
       sh "cmake --build . --target install"
     end
   end
+  dst = File.join(File.expand_path(File.dirname(__FILE__)), 'include')
 
-  [spec.cc, spec.cxx, build.cc, build.cxx].each { |c| c.include_paths << include_dir }
+  FileUtils.mkdir_p(dst)
+  FileUtils.cp_r("#{include_dir}/.", dst)
+
+  [spec.cc, spec.cxx].each { |c| c.include_paths << include_dir }
 end
