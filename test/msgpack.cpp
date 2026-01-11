@@ -33,31 +33,6 @@ mrb_mruby_simplemsgpack_gem_test(mrb_state *mrb)
   mrb_define_const(mrb, msgpack_test, "FIXNUM_MIN",
                    mrb_int_value(mrb, MRB_INT_MIN));
 
-#ifdef MRB_MSGPACK_SYMBOLS
-#ifndef MRB_MSGPACK_SYMBOLS_EXT
-#define MRB_MSGPACK_SYMBOLS_EXT 0
-#endif
-  mrb_define_const(mrb, msgpack_test,
-                   "SYMBOLS_ENABLED",
-                   mrb_true_value());
-  mrb_define_const(mrb, msgpack_test,
-                   "SYMBOLS_EXT_TYPE",
-                   mrb_int_value(mrb, MRB_MSGPACK_SYMBOLS_EXT));
-
-# ifdef MRB_MSGPACK_SYMBOLS_AS_INT
-  mrb_define_const(mrb, msgpack_test,
-                   "SYMBOLS_MODE",
-                   mrb_str_new_lit(mrb, "int"));
-# else
-  mrb_define_const(mrb, msgpack_test,
-                   "SYMBOLS_MODE",
-                   mrb_str_new_lit(mrb, "string"));
-# endif
-#else
-  mrb_define_const(mrb, msgpack_test,
-                   "SYMBOLS_ENABLED",
-                   mrb_false_value());
-#endif
 
 #ifndef MRB_WITHOUT_FLOAT
 # ifdef MRB_USE_FLOAT

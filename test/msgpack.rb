@@ -29,32 +29,24 @@ if Object.const_defined? "Float"
   end
 end
 
+assert("Symbol#to_msgpack") do
+  MessagePack.sym_strategy(:int, 1)
+  assert_equal([:int, 1], MessagePack.sym_strategy)
+  assert_equal(:symbol, MessagePack.unpack(:symbol.to_msgpack))
+  assert_equal(:symbol, MessagePack.unpack(MessagePack.pack(:symbol)))
+  assert_equal([:int, 1], MessagePack.sym_strategy)
+  MessagePack.sym_strategy(:string, 1)
+  assert_equal([:string, 1], MessagePack.sym_strategy)
+  assert_equal(:symbol, MessagePack.unpack(:symbol.to_msgpack))
+  assert_equal(:symbol, MessagePack.unpack(MessagePack.pack(:symbol)))
+  MessagePack.sym_strategy(:raw)
+  assert_equal(:raw, MessagePack.sym_strategy)
+end
+
 assert("String#to_msgpack") do
   assert_equal('string', MessagePack.unpack('string'.to_msgpack))
   assert_equal('string', MessagePack.unpack(MessagePack.pack('string')))
   assert_equal("😎", MessagePack.unpack("😎".to_msgpack))
-end
-
-if MessagePackTest::SYMBOLS_ENABLED
-  assert("Symbol#to_msgpack MRB_MSGPACK_SYMBOLS") do
-    assert_equal(:symbol, MessagePack.unpack(:symbol.to_msgpack))
-    assert_equal(:symbol, MessagePack.unpack(MessagePack.pack(:symbol)))
-  end
-else
-  assert("Symbol#to_msgpack") do
-    assert_equal('symbol', MessagePack.unpack(:symbol.to_msgpack))
-    assert_equal('symbol', MessagePack.unpack(MessagePack.pack(:symbol)))
-  end
-
-  assert("Symbol#to_msgpack with registered ext type") do
-    MessagePack.register_pack_type(0, Symbol) { |symbol| symbol.to_s }
-    MessagePack.register_unpack_type(0) { |data| data.to_sym }
-    assert_equal(:symbol, MessagePack.unpack(:symbol.to_msgpack))
-
-    hash = { key: 123, nested: [:array] }
-    assert_equal(hash, MessagePack.unpack(hash.to_msgpack))
-    assert_equal(hash, MessagePack.unpack(MessagePack.pack(hash)))
-  end
 end
 
 assert("Array#to_msgpack") do
@@ -150,14 +142,14 @@ assert("MessagePack.register_unpack_type") do
 end
 
 assert("Class#to_msgpack with registered ext type") do
-  MessagePack.register_pack_type(1, Class) { |mod| mod.to_s }
-  MessagePack.register_unpack_type(1) { |data| data.constantize }
+  MessagePack.register_pack_type(10, Class) { |mod| mod.to_s }
+  MessagePack.register_unpack_type(10) { |data| data.constantize }
   assert_equal(MessagePack::Error, MessagePack.unpack(MessagePack::Error.to_msgpack))
 end
 
 assert("Registered ext type for one of the core types is ignored") do
-  MessagePack.register_pack_type(1, Array) { |array| nil }
-  MessagePack.register_unpack_type(1) { |data| nil }
+  MessagePack.register_pack_type(10, Array) { |array| nil }
+  MessagePack.register_unpack_type(10) { |data| nil }
   assert_equal(['item'], MessagePack.unpack(['item'].to_msgpack))
 end
 
@@ -177,8 +169,8 @@ assert("Extension types are inherited") do
 
   class InheritsTest < Test; end
 
-  MessagePack.register_pack_type(1, Test) { |test| test.class.to_s + '#' + test.id }
-  MessagePack.register_unpack_type(1) do |data|
+  MessagePack.register_pack_type(10, Test) { |test| test.class.to_s + '#' + test.id }
+  MessagePack.register_unpack_type(10) do |data|
     class_name, id = data.split('#')
     class_name.constantize.new(id)
   end
@@ -189,12 +181,12 @@ end
 
 assert("Extension types for modules") do
   module Mod; end
-  MessagePack.register_pack_type(1, Mod) { |obj| 'packed' }
+  MessagePack.register_pack_type(10, Mod) { |obj| 'packed' }
 
   class Cls; include Mod end
-  assert_equal(Cls.new.to_msgpack, "\xc7\x06\x01packed")
+  assert_equal(Cls.new.to_msgpack, "\xc7\x06\npacked")
 
-  assert_equal(Object.new.extend(Mod).to_msgpack, "\xc7\x06\x01packed")
+  assert_equal(Object.new.extend(Mod).to_msgpack, "\xc7\x06\npacked")
 end
 
 assert("C Packing and unpacking") do

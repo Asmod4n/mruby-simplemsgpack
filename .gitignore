@@ -41,3 +41,4 @@ compile_commands.json
 /.cache/
 include/msgpack/
 include/msgpack.hpp
+.vscode
