@@ -502,9 +502,10 @@ mrb_msgpack_register_pack_type(mrb_state* mrb, mrb_value self)
     mrb_raise(mrb, E_TYPE_ERROR, "not a block");
   }
 
+  mrb_msgpack_ctx* ctx = MRB_MSGPACK_CONTEXT(mrb);
   if (mrb_class_ptr(mrb_class) == mrb->symbol_class) {
     mrb_raise(mrb, E_ARGUMENT_ERROR,
-              "cannot register ext packer for Symbols");
+              "cannot register ext packer for Symbols, use the new MessagePack.sym_strategy function.");
   }
 
   ext_packers = mrb_const_get(mrb, self, MRB_SYM(_ExtPackers));
@@ -516,6 +517,7 @@ mrb_msgpack_register_pack_type(mrb_state* mrb, mrb_value self)
 
   return mrb_nil_value();
 }
+
 
 static mrb_value
 mrb_msgpack_ext_packer_registered(mrb_state *mrb, mrb_value self)
@@ -930,6 +932,16 @@ mrb_msgpack_register_unpack_type(mrb_state* mrb, mrb_value self)
     mrb_raise(mrb, E_TYPE_ERROR, "not a block");
   }
 
+  mrb_msgpack_ctx* ctx = MRB_MSGPACK_CONTEXT(mrb);
+
+  // If the user is using an ext-based symbol strategy,
+  // forbid overriding the symbol ext type.
+  if (ctx->sym_unpacker != nullptr && type == ctx->ext_type) {
+    mrb_raise(mrb, E_ARGUMENT_ERROR,
+      "cannot register ext unpacker for Symbols, use MessagePack.sym_strategy instead.");
+  }
+
+  // Otherwise: safe to register
   mrb_hash_set(mrb,
                mrb_const_get(mrb, self, MRB_SYM(_ExtUnpackers)),
                mrb_int_value(mrb, type),
@@ -937,6 +949,7 @@ mrb_msgpack_register_unpack_type(mrb_state* mrb, mrb_value self)
 
   return mrb_nil_value();
 }
+
 
 static mrb_value
 mrb_msgpack_ext_unpacker_registered(mrb_state *mrb, mrb_value self)

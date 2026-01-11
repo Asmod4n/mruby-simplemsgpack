@@ -1,3 +1,3 @@
 module MessagePack
-    VERSION="3.1"
+    VERSION="4.0"
 end

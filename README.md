@@ -4,7 +4,7 @@ mruby-simplemsgpack
 Breaking changes
 ================
 
-Starting with Release 2.0 only mruby-3 is supported, if you are on an older version check out a commit from before 2021.
+Starting with Version 4, Symbol packing changed, see Symbol Handling (Updated) down below.
 
 Installation
 ============
@@ -120,24 +120,39 @@ lazy.at_pointer("/0/name/foo")
 # => TypeError (cannot navigate into a string)
 ```
 
+Symbol Handling (Updated)
+-------------------------
+MessagePack for mruby now provides a **built‑in, user‑configurable symbol packing strategy**.
+This replaces the old pattern where users had to register extension types manually for symbols.
+
+You can choose between three strategies:
+
+- **`:raw`** (default)
+  Symbols are packed as normal MessagePack strings.
+
+- **`:string`**
+  Symbols are packed as an extension type containing their string name.
+
+- **`:int`**
+  Symbols are packed as an extension type containing their internal symbol ID.
+
+Configure the strategy globally:
+
+```ruby
+# Pack symbols as raw strings (default)
+MessagePack.sym_strategy(:raw)
+
+# Pack symbols as ext with their string name
+MessagePack.sym_strategy(:string, 1)
+
+# Pack symbols as ext with their integer ID
+MessagePack.sym_strategy(:int, 1)
+```
+
 Extension Types
 ---------------
 
 To customize how objects are packed, define an [extension type](https://github.com/msgpack/msgpack/blob/master/spec.md#types-extension-type).
-
-By default, MessagePack packs symbols as strings and does not convert them
-back when unpacking them. Symbols can be preserved by registering an extension
-type for them:
-
-```ruby
-sym_ext_type = 0
-MessagePack.register_pack_type(sym_ext_type, Symbol) { |symbol| symbol.to_s }
-MessagePack.register_unpack_type(sym_ext_type) { |data| data.to_sym }
-
-MessagePack.unpack(:symbol.to_msgpack) # => :symbol
-```
-
-Other objects like classes can also be preserved:
 
 ```ruby
 cls_ext_type = 1
