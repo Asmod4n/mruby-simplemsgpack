@@ -979,7 +979,7 @@ msgpack_ctx_new(mrb_state *mrb, mrb_value self)
 }
 
 #ifndef MRB_MSGPACK_DEFAULT_SYMBOL_TYPE
-#define MRB_MSGPACK_DEFAULT_SYMBOL_TYPE 1U
+#define MRB_MSGPACK_DEFAULT_SYMBOL_TYPE 0U
 #endif
 
 static mrb_value
