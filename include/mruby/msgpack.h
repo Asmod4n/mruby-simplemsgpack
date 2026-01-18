@@ -13,13 +13,13 @@ MRB_API mrb_value mrb_msgpack_unpack(mrb_state *mrb, mrb_value data);
 MRB_API mrb_value mrb_str_constantize(mrb_state *mrb, mrb_value str);
 
 MRB_API void mrb_msgpack_ensure(mrb_state *mrb);
-MRB_API void mrb_msgpack_register_pack_type_value(mrb_state *mrb, int type, mrb_value klass, mrb_value proc);
-MRB_API void mrb_msgpack_register_unpack_type_value(mrb_state *mrb, int type, mrb_value proc);
-MRB_API void mrb_msgpack_register_pack_type_cfunc(mrb_state *mrb, int type, struct RClass *klass, mrb_func_t cfunc, mrb_int argc, const mrb_value *argv);
-MRB_API void mrb_msgpack_register_unpack_type_cfunc(mrb_state *mrb, int type, mrb_func_t cfunc, mrb_int argc, const mrb_value *argv);
+MRB_API void mrb_msgpack_register_pack_type_value(mrb_state *mrb, int8_t type, mrb_value klass, mrb_value proc);
+MRB_API void mrb_msgpack_register_unpack_type_value(mrb_state *mrb, int8_t type, mrb_value proc);
+MRB_API void mrb_msgpack_register_pack_type_cfunc(mrb_state *mrb, int8_t type, struct RClass *klass, mrb_func_t cfunc, mrb_int argc, const mrb_value *argv);
+MRB_API void mrb_msgpack_register_unpack_type_cfunc(mrb_state *mrb, int8_t type, mrb_func_t cfunc, mrb_int argc, const mrb_value *argv);
 MRB_API void mrb_msgpack_teardown(mrb_state *mrb);
 MRB_API void
-mrb_msgpack_set_symbol_strategy(mrb_state *mrb, mrb_sym which, mrb_int ext_type);
+mrb_msgpack_set_symbol_strategy(mrb_state *mrb, mrb_sym which, int8_t ext_type);
 
 MRB_API mrb_value
 mrb_msgpack_get_symbol_strategy(mrb_state *mrb);

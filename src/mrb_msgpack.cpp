@@ -170,22 +170,16 @@ MRB_API void
 mrb_msgpack_ensure(mrb_state *mrb)
 {
   /* Ensure MessagePack module exists */
-  struct RClass *msgpack_mod = mrb_module_get_id(mrb, MRB_SYM(MessagePack));
-  if (!msgpack_mod) {
-    msgpack_mod = mrb_define_module_id(mrb, MRB_SYM(MessagePack));
-  }
+  struct RClass *msgpack_mod = mrb_define_module_id(mrb, MRB_SYM(MessagePack));
 
   /* Ensure MessagePack::Error exists */
-  struct RClass *err = mrb_class_get_under_id(mrb, msgpack_mod, MRB_SYM(Error));
-  if (!err) {
-    err = mrb_define_class_under_id(mrb, msgpack_mod, MRB_SYM(Error), E_RUNTIME_ERROR);
-  }
+  mrb_define_class_under_id(mrb, msgpack_mod, MRB_SYM(Error), E_RUNTIME_ERROR);
   ensure_ext_registry(mrb);
   ensure_msgpack_ctx(mrb);
 }
 
 MRB_API void
-mrb_msgpack_register_pack_type_value(mrb_state *mrb, int type, mrb_value klass, mrb_value proc)
+mrb_msgpack_register_pack_type_value(mrb_state *mrb, int8_t type, mrb_value klass, mrb_value proc)
 {
   ensure_ext_registry(mrb);
   if (type < 0 || type > 127) mrb_raise(mrb, E_RANGE_ERROR, "ext type out of range");
@@ -199,7 +193,7 @@ mrb_msgpack_register_pack_type_value(mrb_state *mrb, int type, mrb_value klass, 
 }
 
 MRB_API void
-mrb_msgpack_register_unpack_type_value(mrb_state *mrb, int type, mrb_value proc)
+mrb_msgpack_register_unpack_type_value(mrb_state *mrb, int8_t type, mrb_value proc)
 {
   ensure_ext_registry(mrb);
   if (type < 0 || type > 127) mrb_raise(mrb, E_RANGE_ERROR, "ext type out of range");
@@ -211,7 +205,7 @@ mrb_msgpack_register_unpack_type_value(mrb_state *mrb, int type, mrb_value proc)
 
 MRB_API void
 mrb_msgpack_register_pack_type_cfunc(mrb_state *mrb,
-                                     int type,
+                                     int8_t type,
                                      struct RClass *klass,
                                      mrb_func_t cfunc,
                                      mrb_int argc,
@@ -233,7 +227,7 @@ mrb_msgpack_register_pack_type_cfunc(mrb_state *mrb,
 
 MRB_API void
 mrb_msgpack_register_unpack_type_cfunc(mrb_state *mrb,
-                                       int type,
+                                       int8_t type,
                                        mrb_func_t cfunc,
                                        mrb_int argc,
                                        const mrb_value *argv)
@@ -1125,7 +1119,7 @@ mrb_msgpack_ext_unpacker_registered(mrb_state *mrb, mrb_value self)
 }
 
 MRB_API void
-mrb_msgpack_set_symbol_strategy(mrb_state *mrb, mrb_sym which, mrb_int ext_type)
+mrb_msgpack_set_symbol_strategy(mrb_state *mrb, mrb_sym which, int8_t ext_type)
 {
   mrb_msgpack_ctx *ctx = MRB_MSGPACK_CONTEXT(mrb);
 
@@ -1139,14 +1133,14 @@ mrb_msgpack_set_symbol_strategy(mrb_state *mrb, mrb_sym which, mrb_int ext_type)
   if (which == MRB_SYM(string)) {
     ctx->sym_packer   = mrb_msgpack_pack_symbol_value_as_string;
     ctx->sym_unpacker = mrb_msgpack_unpack_symbol_as_string;
-    ctx->ext_type     = (int8_t)ext_type;
+    ctx->ext_type     = ext_type;
     return;
   }
 
   if (which == MRB_SYM(int)) {
     ctx->sym_packer   = mrb_msgpack_pack_symbol_value_as_int;
     ctx->sym_unpacker = mrb_msgpack_unpack_symbol_as_int;
-    ctx->ext_type     = (int8_t)ext_type;
+    ctx->ext_type     = ext_type;
     return;
   }
 
