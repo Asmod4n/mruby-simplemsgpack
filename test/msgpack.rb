@@ -189,10 +189,6 @@ assert("Extension types for modules") do
   assert_equal(Object.new.extend(Mod).to_msgpack, "\xc7\x06\npacked")
 end
 
-assert("C Packing and unpacking") do
-  assert_equal("hallo", MessagePackTest.test_unpack(MessagePackTest.test_pack))
-end
-
 assert("MessagePack.unpack_lazy with JSON Pointer navigation") do
   data = [
     { "id" => 1, "name" => "Alpha" },
@@ -225,4 +221,112 @@ assert("MessagePack.unpack_lazy with JSON Pointer navigation") do
 
   # Error: wrong type traversal (trying to descend into string)
   assert_raise(TypeError) { lazy.at_pointer("/0/name/foo") }
+end
+
+# --- C API tests -------------------------------------------------------------
+
+assert("C Packing and unpacking") do
+  assert_equal("hallo", MessagePackTest.test_unpack(MessagePackTest.test_pack))
+end
+
+
+assert("C API: mrb_msgpack_constantize") do
+  assert_equal Object, MessagePackTest.constantize("Object")
+  assert_equal MessagePackTest, MessagePackTest.constantize("MessagePackTest")
+  assert_equal MessagePack::Error, MessagePackTest.constantize("MessagePack::Error")
+end
+
+assert("C API: symbol strategy getter/setter") do
+  MessagePackTest.sym_strategy_set(:raw)
+  assert_equal :raw, MessagePackTest.sym_strategy_get
+
+  MessagePackTest.sym_strategy_set(:string, 7)
+  assert_equal [:string, 7], MessagePackTest.sym_strategy_get
+
+  MessagePackTest.sym_strategy_set(:int, 3)
+  assert_equal [:int, 3], MessagePackTest.sym_strategy_get
+end
+
+assert("C API: real pack/unpack callbacks") do
+  # Register real C callbacks
+  MessagePackTest.register_pack_type_real(55)
+  MessagePackTest.register_unpack_type_real(55)
+
+end
+
+assert("C API: pack/unpack roundtrip") do
+  assert_equal "hallo", MessagePackTest.test_unpack(MessagePackTest.test_pack)
+end
+
+assert("String#constantize: simple constant") do
+  assert_equal String, "String".constantize
+  assert_equal Object, "Object".constantize
+end
+
+assert("String#constantize: nested constant") do
+  assert_equal MessagePack::Error, "MessagePack::Error".constantize
+end
+
+assert("String#constantize: leading ::") do
+  assert_equal String, "::String".constantize
+  assert_equal MessagePack::Error, "::MessagePack::Error".constantize
+  assert_equal String, "::Object::String".constantize
+end
+
+assert("String#constantize: explicit Object prefix") do
+  assert_equal String, "Object::String".constantize
+  assert_equal String, "::Object::String".constantize
+end
+
+assert("String#constantize: final constant may be any Ruby object") do
+  module ConstTest
+    VALUE = 123
+  end
+
+  assert_equal 123, "ConstTest::VALUE".constantize
+end
+
+assert("String#constantize: intermediate segments must be class/module") do
+  module ConstTest2
+    VALUE = 123
+  end
+
+  assert_raise(TypeError) do
+    "ConstTest2::VALUE::Nope".constantize
+  end
+end
+
+assert("String#constantize: missing constant raises NameError") do
+  assert_raise(NameError) { "Nope".constantize }
+  assert_raise(NameError) { "Object::Nope".constantize }
+  assert_raise(NameError) { "::Object::Nope".constantize }
+end
+
+assert("String#constantize: invalid empty segments") do
+  assert_raise(NameError) { "Object::::String".constantize }
+  assert_raise(NameError) { "Object::".constantize }
+  assert_raise(NameError) { "::".constantize }
+end
+
+assert("String#constantize: empty string") do
+  assert_raise(NameError) { "".constantize }
+end
+
+assert("String#constantize: weird but legal constants") do
+  module ConstTest3
+    module Inner; end
+  end
+
+  assert_equal ConstTest3::Inner, "ConstTest3::Inner".constantize
+end
+
+assert("String#constantize: does not allow lexical lookup") do
+  module Outer
+    module Inner
+      VALUE = 99
+    end
+  end
+
+  # No lexical lookup in mruby → must be fully qualified
+  assert_raise(NameError) { "Inner::VALUE".constantize }
 end
