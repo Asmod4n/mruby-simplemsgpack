@@ -95,7 +95,13 @@ MRB_CPP_DEFINE_TYPE(mrb_msgpack_ctx, mrb_msgpack_ctx);
 #define MRB_MSGPACK_DEFAULT_SYMBOL_TYPE 0U
 #endif
 
-#define MRB_MSGPACK_CONTEXT(mrb) (static_cast<mrb_msgpack_ctx*>(mrb_cptr(mrb_gv_get((mrb), MRB_SYM(__msgpack__ctx)))))
+#define MRB_MSGPACK_CONTEXT(mrb)                                           \
+  ([mrb]() -> mrb_msgpack_ctx* {                                           \
+    mrb_value v = mrb_gv_get((mrb), MRB_SYM(__msgpack__ctx));              \
+    mrb_assert(mrb_cptr_p(v));                                             \
+    return static_cast<mrb_msgpack_ctx*>(mrb_cptr(v));                     \
+  }())
+
 
 static void mrb_msgpack_pack_value(mrb_state* mrb, mrb_value self, msgpack::packer<mrb_msgpack_sbo_writer>& pk);
 static void mrb_msgpack_pack_array_value(mrb_state* mrb, mrb_value self, msgpack::packer<mrb_msgpack_sbo_writer>& pk);
@@ -120,7 +126,7 @@ static mrb_value
 ensure_ext_registry(mrb_state *mrb)
 {
   mrb_value reg = mrb_gv_get(mrb, MRB_SYM(__msgpack_ext_registry__));
-  if (!mrb_nil_p(reg)) return reg;
+  if (mrb_hash_p(reg)) return reg;
 
   mrb_value registry   = mrb_hash_new(mrb);
   mrb_value packers    = mrb_hash_new(mrb);
@@ -137,7 +143,7 @@ static mrb_value
 ensure_msgpack_ctx(mrb_state *mrb)
 {
   mrb_value ctxv = mrb_gv_get(mrb, MRB_SYM(__msgpack__ctx));
-  if (!mrb_nil_p(ctxv)) return ctxv;
+  if (mrb_cptr_p(ctxv)) return ctxv;
 
   /* Allocate the C context directly and store as a cptr in a GV.
      This avoids creating any Ruby classes/modules and works with mrb_open_core. */
@@ -182,12 +188,12 @@ MRB_API void
 mrb_msgpack_register_pack_type_value(mrb_state *mrb, int8_t type, mrb_value klass, mrb_value proc)
 {
   ensure_ext_registry(mrb);
-  if (type < 0 || type > 127) mrb_raise(mrb, E_RANGE_ERROR, "ext type out of range");
-  if (mrb_nil_p(proc) || mrb_type(proc) != MRB_TT_PROC) mrb_raise(mrb, E_TYPE_ERROR, "packer must be a Proc");
+  if (unlikely(type < 0 || type > 127)) mrb_raise(mrb, E_RANGE_ERROR, "ext type out of range");
+  if (unlikely(mrb_type(proc) != MRB_TT_PROC)) mrb_raise(mrb, E_TYPE_ERROR, "packer must be a Proc");
 
   mrb_value packers = ext_packers_hash(mrb);
   mrb_value cfg = mrb_hash_new_capa(mrb, 2);
-  mrb_hash_set(mrb, cfg, mrb_symbol_value(MRB_SYM(type)),   mrb_int_value(mrb, type));
+  mrb_hash_set(mrb, cfg, mrb_symbol_value(MRB_SYM(type)),   mrb_fixnum_value(type));
   mrb_hash_set(mrb, cfg, mrb_symbol_value(MRB_SYM(packer)), proc);
   mrb_hash_set(mrb, packers, klass, cfg);
 }
@@ -196,11 +202,11 @@ MRB_API void
 mrb_msgpack_register_unpack_type_value(mrb_state *mrb, int8_t type, mrb_value proc)
 {
   ensure_ext_registry(mrb);
-  if (type < 0 || type > 127) mrb_raise(mrb, E_RANGE_ERROR, "ext type out of range");
-  if (mrb_nil_p(proc) || mrb_type(proc) != MRB_TT_PROC) mrb_raise(mrb, E_TYPE_ERROR, "unpacker must be a Proc");
+  if (unlikely(type < 0 || type > 127)) mrb_raise(mrb, E_RANGE_ERROR, "ext type out of range");
+  if (unlikely(mrb_type(proc) != MRB_TT_PROC)) mrb_raise(mrb, E_TYPE_ERROR, "unpacker must be a Proc");
 
   mrb_value unpackers = ext_unpackers_hash(mrb);
-  mrb_hash_set(mrb, unpackers, mrb_int_value(mrb, type), proc);
+  mrb_hash_set(mrb, unpackers, mrb_fixnum_value(type), proc);
 }
 
 MRB_API void
@@ -211,11 +217,9 @@ mrb_msgpack_register_pack_type_cfunc(mrb_state *mrb,
                                      mrb_int argc,
                                      const mrb_value *argv)
 {
+  if (unlikely(klass == NULL)) mrb_raise(mrb, E_ARGUMENT_ERROR, "klass is NULL");
+  if (unlikely(cfunc == NULL)) mrb_raise(mrb, E_ARGUMENT_ERROR, "pack callback cannot be NULL");
   ensure_ext_registry(mrb);
-  if (!klass) mrb_raise(mrb, E_ARGUMENT_ERROR, "klass is NULL");
-  if (cfunc == NULL) {
-    mrb_raise(mrb, E_ARGUMENT_ERROR, "pack callback cannot be NULL");
-  }
 
   struct RProc *rproc =
       mrb_proc_new_cfunc_with_env(mrb, cfunc, argc, argv);
@@ -233,9 +237,7 @@ mrb_msgpack_register_unpack_type_cfunc(mrb_state *mrb,
                                        const mrb_value *argv)
 {
   ensure_ext_registry(mrb);
-  if (cfunc == NULL) {
-    mrb_raise(mrb, E_ARGUMENT_ERROR, "unpack callback cannot be NULL");
-  }
+  if (unlikely(cfunc == NULL)) mrb_raise(mrb, E_ARGUMENT_ERROR, "unpack callback cannot be NULL");
 
   struct RProc *rproc =
       mrb_proc_new_cfunc_with_env(mrb, cfunc, argc, argv);
@@ -250,13 +252,13 @@ MRB_API void
 mrb_msgpack_teardown(mrb_state *mrb)
 {
   mrb_value ctxv = mrb_gv_get(mrb, MRB_SYM(__msgpack__ctx));
-  if (!mrb_nil_p(ctxv)) {
+  if (likely(mrb_cptr_p(ctxv))) {
     void *p = mrb_cptr(ctxv);
-    if (p) mrb_free(mrb, p);
+    mrb_free(mrb, p);
   }
 
-  mrb_gv_set(mrb, MRB_SYM(__msgpack_ext_registry__), mrb_nil_value());
-  mrb_gv_set(mrb, MRB_SYM(__msgpack__ctx), mrb_nil_value());
+  mrb_gv_remove(mrb, MRB_SYM(__msgpack_ext_registry__));
+  mrb_gv_remove(mrb, MRB_SYM(__msgpack__ctx));
 }
 MRB_END_DECL
 /* ------------------------------------------------------------------------
