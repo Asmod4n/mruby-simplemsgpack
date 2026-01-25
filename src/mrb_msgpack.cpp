@@ -22,6 +22,7 @@ MRB_END_DECL
 
 #include <mruby/cpp_helpers.hpp>
 #include <mruby/num_helpers.hpp>
+#include <mruby/branch_pred.h>
 #include <cstring>
 
 #include <string>
@@ -29,43 +30,64 @@ MRB_END_DECL
 #include <atomic>
 #include <cstdint>
 
-#if ((defined(__has_builtin) && __has_builtin(__builtin_expect))||(__GNUC__ >= 3) || (__INTEL_COMPILER >= 800) || defined(__clang__))
-#define likely(x)   __builtin_expect(!!(x), 1)
-#define unlikely(x) __builtin_expect(!!(x), 0)
-#else
-#define likely(x)   (x)
-#define unlikely(x) (x)
-#endif
 
 /* ------------------------------------------------------------------------
  * SBO writer
  * ------------------------------------------------------------------------ */
+static mrb_int
+safe_size_to_mrb_int(mrb_state *mrb, size_t sz)
+{
+  if (unlikely(sz > (size_t)MRB_INT_MAX)) {
+    mrb_raise(mrb, E_ARGUMENT_ERROR, "msgpack: size too large");
+  }
+  return (mrb_int)sz;
+}
+
+mrb_int
+compute_capacity(mrb_state *mrb, size_t stack_size, size_t buf_size)
+{
+  mrb_int s = safe_size_to_mrb_int(mrb, stack_size);
+  mrb_int b = safe_size_to_mrb_int(mrb, buf_size);
+
+  mrb_int sum;
+  if (unlikely(mrb_int_add_overflow(s, b, &sum))) {
+    mrb_raise(mrb, E_ARGUMENT_ERROR, "msgpack: size overflow");
+  }
+
+  mrb_int capa;
+  if (unlikely(mrb_int_mul_overflow(sum, 2, &capa))) {
+    mrb_raise(mrb, E_ARGUMENT_ERROR, "msgpack: size overflow");
+  }
+
+  return capa;
+}
 
 struct mrb_msgpack_sbo_writer {
   mrb_msgpack_sbo_writer(mrb_state* mrb)
-    : mrb(mrb), heap_str(mrb_nil_value()) {}
+    : mrb(mrb) {}
 
-  void write(const char* buf, size_t len) {
-    if (!using_heap) {
-      if (len <= STACK_CAP - size) {
-        std::memcpy(stack_buf + size, buf, len);
-        size += len;
-        return;
+  void write(const char* buf, size_t buf_size) {
+    if (mrb_string_p(heap_str)) {
+      mrb_str_cat(mrb, heap_str, buf, buf_size);
+    } else {
+      if (likely(buf_size <= STACK_CAP - stack_size)) {
+        std::memcpy(stack_buf + stack_size, buf, buf_size);
+        stack_size += buf_size;
+      } else {
+        mrb_int capa = compute_capacity(mrb, stack_size, buf_size);
+        heap_str = mrb_str_new_capa(mrb, capa);
+        mrb_str_cat(mrb, heap_str, stack_buf, stack_size);
+        mrb_str_cat(mrb, heap_str, buf, buf_size);
       }
-
-      using_heap = true;
-      heap_str = mrb_str_new_capa(mrb, (mrb_int)(size + len) * 2);
-      mrb_str_cat(mrb, heap_str, stack_buf, size);
     }
-
-    mrb_str_cat(mrb, heap_str, buf, len);
   }
 
   mrb_value result() {
-    if (!using_heap) {
-      return mrb_str_new(mrb, stack_buf, size);
+    if (mrb_string_p(heap_str)) {
+      return heap_str;
+    } else {
+      return mrb_str_new(mrb, stack_buf, stack_size);
     }
-    return heap_str;
   }
 
 private:
@@ -73,10 +95,8 @@ private:
 
   static constexpr size_t STACK_CAP = 8 * 1024;
   char   stack_buf[STACK_CAP];
-  size_t size      = 0;
-  bool   using_heap = false;
-
-  mrb_value heap_str;
+  size_t stack_size      = 0;
+  mrb_value heap_str = mrb_undef_value();
 };
 
 /* ------------------------------------------------------------------------
@@ -120,7 +140,7 @@ static mrb_value
 ensure_ext_registry(mrb_state *mrb)
 {
   mrb_value reg = mrb_gv_get(mrb, MRB_SYM(__msgpack_ext_registry__));
-  if (!mrb_nil_p(reg)) return reg;
+  if (mrb_hash_p(reg)) return reg;
 
   mrb_value registry   = mrb_hash_new(mrb);
   mrb_value packers    = mrb_hash_new(mrb);
@@ -137,7 +157,7 @@ static mrb_value
 ensure_msgpack_ctx(mrb_state *mrb)
 {
   mrb_value ctxv = mrb_gv_get(mrb, MRB_SYM(__msgpack__ctx));
-  if (!mrb_nil_p(ctxv)) return ctxv;
+  if (mrb_cptr_p(ctxv)) return ctxv;
 
   /* Allocate the C context directly and store as a cptr in a GV.
      This avoids creating any Ruby classes/modules and works with mrb_open_core. */

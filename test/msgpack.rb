@@ -330,3 +330,10 @@ assert("String#constantize: does not allow lexical lookup") do
   # No lexical lookup in mruby → must be fully qualified
   assert_raise(NameError) { "Inner::VALUE".constantize }
 end
+
+assert("Large msgpack msg") do
+  val = " " * 16348   # > 8 KB, forces heap promotion
+  packed = val.to_msgpack
+  unpacked = MessagePack.unpack(packed)
+  assert_equal(val, unpacked)
+end
