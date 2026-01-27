@@ -331,9 +331,72 @@ assert("String#constantize: does not allow lexical lookup") do
   assert_raise(NameError) { "Inner::VALUE".constantize }
 end
 
+# ------------------------------------------------------------
+# Additional constantize tests
+# ------------------------------------------------------------
+
+assert("String#constantize: shadowed constants") do
+  module ShadowTest
+    String = 123
+  end
+
+  assert_equal 123, "ShadowTest::String".constantize
+end
+
+assert("String#constantize: constant aliasing") do
+  module AliasTest
+    Alias = String
+  end
+
+  assert_equal String, "AliasTest::Alias".constantize
+end
+
+assert("String#constantize: alias used as namespace") do
+  module AliasNS
+    Inner = Module.new
+  end
+
+  assert_equal AliasNS::Inner, "AliasNS::Inner".constantize
+end
+
+assert("String#constantize: non‑namespace alias as intermediate") do
+  module BadAlias
+    X = 123
+  end
+
+  assert_raise(TypeError) { "BadAlias::X::Nope".constantize }
+end
+
+assert("String#constantize: no ancestor lookup for A::B") do
+  module Base
+    VALUE = 1
+  end
+
+  module Derived
+    include Base
+  end
+
+  assert_raise(NameError) { "Derived::VALUE".constantize }
+end
+
+assert("String#constantize: digits in constant names") do
+  class HTTP2; end
+  assert_equal HTTP2, "HTTP2".constantize
+end
+
+assert("String#constantize: lowercase start is invalid") do
+  assert_raise(NameError) { "foo".constantize }
+  assert_raise(NameError) { "Object::bar".constantize }
+end
+
 assert("Large msgpack msg") do
   val = " " * 16348   # > 8 KB, forces heap promotion
   packed = val.to_msgpack
   unpacked = MessagePack.unpack(packed)
   assert_equal(val, unpacked)
+
+  val2 = ["small", val].to_msgpack # forces stack to heap promotion + copying of the stack buffer.
+  packed2 = val2.to_msgpack
+  unpacked2 = MessagePack.unpack(packed2)
+  assert_equal(val2, unpacked2)
 end

@@ -94,7 +94,7 @@ private:
   mrb_state* mrb;
 
   static constexpr size_t STACK_CAP = 8 * 1024;
-  char   stack_buf[STACK_CAP];
+  char   stack_buf[STACK_CAP] = {0};
   size_t stack_size      = 0;
   mrb_value heap_str = mrb_undef_value();
 };
