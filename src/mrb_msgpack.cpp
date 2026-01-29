@@ -29,6 +29,23 @@ MRB_END_DECL
 #include <string_view>
 #include <atomic>
 #include <cstdint>
+#include <mrbconf.h>
+
+#ifndef MRB_STR_LENGTH_MAX
+# define MRB_STR_LENGTH_MAX 1048576
+#endif
+
+#ifndef MRB_ARY_LENGTH_MAX
+# define MRB_ARY_LENGTH_MAX 131072
+#endif
+
+#define MSGPACK_STR_LIMIT  MRB_STR_LENGTH_MAX
+#define MSGPACK_BIN_LIMIT  MRB_STR_LENGTH_MAX
+#define MSGPACK_EXT_LIMIT  MRB_STR_LENGTH_MAX
+#define MSGPACK_ARY_LIMIT  MRB_ARY_LENGTH_MAX
+#define MSGPACK_MAP_LIMIT  MRB_ARY_LENGTH_MAX
+#define MSGPACK_DEPTH_LIMIT 128
+
 
 
 /* ------------------------------------------------------------------------
@@ -861,8 +878,17 @@ MRB_API mrb_value
 mrb_msgpack_unpack(mrb_state *mrb, mrb_value data)
 {
   data = mrb_str_to_str(mrb, data);
+  msgpack::unpack_limit limit(
+    MSGPACK_ARY_LIMIT,   // array
+    MSGPACK_MAP_LIMIT,   // map
+    MSGPACK_STR_LIMIT,   // str
+    MSGPACK_BIN_LIMIT,   // bin
+    MSGPACK_EXT_LIMIT,   // ext
+    MSGPACK_DEPTH_LIMIT  // depth
+  );
+
   msgpack::object_handle oh =
-    msgpack::unpack(RSTRING_PTR(data), RSTRING_LEN(data));
+    msgpack::unpack(RSTRING_PTR(data), RSTRING_LEN(data), nullptr, nullptr, limit);
   return mrb_unpack_msgpack_obj(mrb, oh.get());
 }
 
@@ -877,11 +903,20 @@ mrb_msgpack_unpack_m(mrb_state* mrb, mrb_value self)
   std::size_t len = RSTRING_LEN(data);
   std::size_t off = 0;
 
+  msgpack::unpack_limit limit(
+    MSGPACK_ARY_LIMIT,   // array
+    MSGPACK_MAP_LIMIT,   // map
+    MSGPACK_STR_LIMIT,   // str
+    MSGPACK_BIN_LIMIT,   // bin
+    MSGPACK_EXT_LIMIT,   // ext
+    MSGPACK_DEPTH_LIMIT  // depth
+  );
+
   try {
     if (mrb_type(block) == MRB_TT_PROC) {
       while (off < len) {
         try {
-          msgpack::object_handle oh = msgpack::unpack(buf, len, off);
+          msgpack::object_handle oh = msgpack::unpack(buf, len, off, nullptr, nullptr, limit);
           mrb_yield(mrb, block, mrb_unpack_msgpack_obj(mrb, oh.get()));
         }
         catch (const msgpack::insufficient_bytes&) {
@@ -891,7 +926,7 @@ mrb_msgpack_unpack_m(mrb_state* mrb, mrb_value self)
       return mrb_convert_number(mrb, (mrb_int)off);
     }
     else {
-      msgpack::object_handle oh = msgpack::unpack(buf, len, off);
+      msgpack::object_handle oh = msgpack::unpack(buf, len, off, nullptr, nullptr, limit);
       return mrb_unpack_msgpack_obj(mrb, oh.get());
     }
   }
@@ -951,7 +986,7 @@ mrb_msgpack_unpack_lazy_m(mrb_state *mrb, mrb_value self)
   try {
     mrb_value object_handle =
       mrb_obj_new(mrb,
-                  mrb_class_get_under_id(mrb, mrb_class_ptr(self), MRB_SYM(ObjectHandle)),
+                  mrb_class_get_under_id(mrb, mrb_class_ptr(self), MRB_SYM(_ObjectHandle)),
                   1, &data);
 
     auto* handle = (msgpack_object_handle*)mrb_data_get_ptr(mrb, object_handle, &msgpack_object_handle_type);
@@ -1662,7 +1697,7 @@ mrb_mruby_simplemsgpack_gem_init(mrb_state* mrb)
 
   mrb_object_handle_class =
     mrb_define_class_under_id(mrb, msgpack_mod,
-                              MRB_SYM(ObjectHandle), mrb->object_class);
+                              MRB_SYM(_ObjectHandle), mrb->object_class);
 
   MRB_SET_INSTANCE_TT(mrb_object_handle_class, MRB_TT_DATA);
 

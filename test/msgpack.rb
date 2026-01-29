@@ -424,7 +424,7 @@ end
 
 assert("LFU: eviction removes least frequently used") do
   # Wir erzeugen mehr Klassen als MAX_SIZE (128)
-  150.times do |i|
+  1500.times do |i|
     Object.const_set("LFUTest#{i}", Class.new)
     assert_equal Object.const_get("LFUTest#{i}"), "LFUTest#{i}".constantize
   end
@@ -434,11 +434,11 @@ assert("LFU: frequently used entries survive eviction") do
   class HotA; end
   class HotB; end
 
-  50.times { assert_equal HotA, "HotA".constantize }
-  50.times { assert_equal HotB, "HotB".constantize }
+  500.times { assert_equal HotA, "HotA".constantize }
+  500.times { assert_equal HotB, "HotB".constantize }
 
   # Jetzt Cache fluten
-  200.times do |i|
+  2000.times do |i|
     Object.const_set("Cold#{i}", Class.new)
     assert_equal Object.const_get("Cold#{i}"), "Cold#{i}".constantize
   end
@@ -459,7 +459,7 @@ end
 
 assert("LFU: index overflow does not crash") do
   base = "AA"
-  300.times do |i|
+  3000.times do |i|
     key = base + i.to_s
     Object.const_set(key, Class.new)
     assert_equal Object.const_get(key), key.constantize
@@ -469,7 +469,7 @@ assert("LFU: index overflow does not crash") do
 end
 
 assert("LFU: GC stress does not break cache") do
-  200.times do |i|
+  2000.times do |i|
     key = "GCStress#{i}"
     Object.const_set(key, Class.new)
     assert_equal Object.const_get(key), key.constantize
@@ -481,13 +481,13 @@ end
 
 assert("LFU: entry slot reuse is safe") do
   # Fülle Cache
-  128.times do |i|
+  1280.times do |i|
     Object.const_set("Reuse#{i}", Class.new)
     assert_equal Object.const_get("Reuse#{i}"), "Reuse#{i}".constantize
   end
 
   # Erzeuge Evictions
-  50.times do |i|
+  5000.times do |i|
     Object.const_set("ReuseEvict#{i}", Class.new)
     assert_equal Object.const_get("ReuseEvict#{i}"), "ReuseEvict#{i}".constantize
   end
@@ -499,7 +499,7 @@ end
 assert("LFU: constantize correctness under pressure") do
   module A; module B; class C; end; end; end
 
-  200.times do |i|
+  2000.times do |i|
     Object.const_set("Spam#{i}", Class.new)
     assert_equal Object.const_get("Spam#{i}"), "Spam#{i}".constantize
   end
@@ -511,15 +511,93 @@ assert("LFU: mixed workload stability") do
   class HotX; end
   class HotY; end
 
-  100.times { assert_equal HotX, "HotX".constantize }
-  100.times { assert_equal HotY, "HotY".constantize }
+  1000.times { assert_equal HotX, "HotX".constantize }
+  1000.times { assert_equal HotY, "HotY".constantize }
 
-  200.times do |i|
+  2000.times do |i|
     if i % 5 == 0
       assert_raise(NameError) { "Miss#{i}".constantize }
     else
       assert_equal HotX, "HotX".constantize
       assert_equal HotY, "HotY".constantize
     end
+  end
+end
+
+assert("MessagePack: register_ext_type invalid callbacks") do
+  # pack kein Proc
+  assert_raise(ArgumentError) do
+    MessagePack.register_ext_type(1, String,
+      pack: 123,
+      unpack: ->(x) { x }
+    )
+  end
+
+  # unpack kein Proc
+  assert_raise(ArgumentError) do
+    MessagePack.register_ext_type(1, String,
+      pack: ->(x) { x },
+      unpack: 123
+    )
+  end
+end
+
+assert("MessagePack: unpack invalid bytes") do
+  assert_raise(MessagePack::Error) { MessagePack.unpack("\xA5hel") }
+  assert_raise(MessagePack::Error) { MessagePack.unpack("\x92\x01") }
+  assert_raise(MessagePack::Error) { MessagePack.unpack("\x81\xA1a") }
+end
+
+
+assert("MessagePack: JSON Pointer syntax errors") do
+  data = { "a" => 1 }
+  lazy = MessagePack.unpack_lazy(MessagePack.pack(data))
+
+  assert_raise(ArgumentError) { lazy.at_pointer("a") }
+
+  assert_raise(KeyError) { lazy.at_pointer("//a") }
+
+  assert_raise(KeyError) { lazy.at_pointer("/~2") }
+
+  assert_raise(KeyError) { lazy.at_pointer("/~") }
+end
+
+
+assert("MessagePack: JSON Pointer extreme tokens") do
+  data = { "a/b" => 1, "~x" => 2 }
+  lazy = MessagePack.unpack_lazy(MessagePack.pack(data))
+
+  assert_equal 1, lazy.at_pointer("/a~1b")
+  assert_equal 2, lazy.at_pointer("/~0x")
+
+  long_key = "x" * 10_000
+  lazy2 = MessagePack.unpack_lazy(MessagePack.pack({ long_key => 5 }))
+
+  assert_equal 5, lazy2.at_pointer("/" + long_key)
+end
+
+assert("MessagePack: JSON Pointer semantic errors") do
+  data = { "a" => [1, 2, 3] }
+  lazy = MessagePack.unpack_lazy(MessagePack.pack(data))
+
+  assert_raise(KeyError) { lazy.at_pointer("/b") }
+
+  assert_raise(IndexError) { lazy.at_pointer("/a/foo") }
+
+  assert_raise(IndexError) { lazy.at_pointer("/a/-1") }
+
+  assert_raise(IndexError) { lazy.at_pointer("/a/999") }
+end
+
+assert("MessagePack: unpack ext without unpacker") do
+  class Foo2; end
+
+  MessagePack.register_pack_type(42, Foo2) { "X" }
+
+  foo = Foo2.new
+  packed = foo.to_msgpack
+
+  assert_raise(MessagePack::Error) do
+    MessagePack.unpack(packed)
   end
 end
