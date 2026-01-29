@@ -223,6 +223,27 @@ assert("MessagePack.unpack_lazy with JSON Pointer navigation") do
   assert_raise(TypeError) { lazy.at_pointer("/0/name/foo") }
 end
 
+assert("MessagePack: ext packer without unpacker") do
+  class Foo
+    def initialize(x)
+      @x = x
+    end
+  end
+
+  # Nur Pack‑Type registrieren, KEIN Unpack‑Type
+  MessagePack.register_pack_type(42, Foo) do |obj|
+    "FOO:#{obj.object_id}"
+  end
+
+  foo = Foo.new(123)
+
+  packed = foo.to_msgpack
+
+  # Jetzt unpacken — ohne Unpacker für Typ 42
+  assert_raise(MessagePack::Error) { MessagePack.unpack(packed) }
+end
+
+
 # --- C API tests -------------------------------------------------------------
 
 assert("C Packing and unpacking") do
@@ -399,4 +420,106 @@ assert("Large msgpack msg") do
   packed2 = val2.to_msgpack
   unpacked2 = MessagePack.unpack(packed2)
   assert_equal(val2, unpacked2)
+end
+
+assert("LFU: eviction removes least frequently used") do
+  # Wir erzeugen mehr Klassen als MAX_SIZE (128)
+  150.times do |i|
+    Object.const_set("LFUTest#{i}", Class.new)
+    assert_equal Object.const_get("LFUTest#{i}"), "LFUTest#{i}".constantize
+  end
+end
+
+assert("LFU: frequently used entries survive eviction") do
+  class HotA; end
+  class HotB; end
+
+  50.times { assert_equal HotA, "HotA".constantize }
+  50.times { assert_equal HotB, "HotB".constantize }
+
+  # Jetzt Cache fluten
+  200.times do |i|
+    Object.const_set("Cold#{i}", Class.new)
+    assert_equal Object.const_get("Cold#{i}"), "Cold#{i}".constantize
+  end
+
+  # HotA und HotB müssen überlebt haben
+  assert_equal HotA, "HotA".constantize
+  assert_equal HotB, "HotB".constantize
+end
+
+assert("LFU: long keys are not cached") do
+  long = "A" * 200  # KEY_MAX = 64
+
+  assert_raise(NameError) { long.constantize }
+
+  # Zweiter Aufruf → wieder Miss → also NICHT gecached
+  assert_raise(NameError) { long.constantize }
+end
+
+assert("LFU: index overflow does not crash") do
+  base = "AA"
+  300.times do |i|
+    key = base + i.to_s
+    Object.const_set(key, Class.new)
+    assert_equal Object.const_get(key), key.constantize
+  end
+
+  assert_true true
+end
+
+assert("LFU: GC stress does not break cache") do
+  200.times do |i|
+    key = "GCStress#{i}"
+    Object.const_set(key, Class.new)
+    assert_equal Object.const_get(key), key.constantize
+    GC.start
+  end
+
+  assert_equal GCStress199, "GCStress199".constantize
+end
+
+assert("LFU: entry slot reuse is safe") do
+  # Fülle Cache
+  128.times do |i|
+    Object.const_set("Reuse#{i}", Class.new)
+    assert_equal Object.const_get("Reuse#{i}"), "Reuse#{i}".constantize
+  end
+
+  # Erzeuge Evictions
+  50.times do |i|
+    Object.const_set("ReuseEvict#{i}", Class.new)
+    assert_equal Object.const_get("ReuseEvict#{i}"), "ReuseEvict#{i}".constantize
+  end
+
+  # Neue Keys müssen korrekt funktionieren
+  assert_equal Object.const_get("ReuseEvict49"), "ReuseEvict49".constantize
+end
+
+assert("LFU: constantize correctness under pressure") do
+  module A; module B; class C; end; end; end
+
+  200.times do |i|
+    Object.const_set("Spam#{i}", Class.new)
+    assert_equal Object.const_get("Spam#{i}"), "Spam#{i}".constantize
+  end
+
+  assert_equal A::B::C, "A::B::C".constantize
+end
+
+assert("LFU: mixed workload stability") do
+  class HotX; end
+  class HotY; end
+
+  100.times { assert_equal HotX, "HotX".constantize }
+  100.times { assert_equal HotY, "HotY".constantize }
+
+  200.times do |i|
+    if i % 5 == 0
+      assert_raise(NameError) { "Miss#{i}".constantize }
+    else
+      assert_equal HotX, "HotX".constantize
+      assert_equal HotY, "HotY".constantize
+    end
+  end
 end

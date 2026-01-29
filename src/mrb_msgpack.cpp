@@ -43,7 +43,7 @@ safe_size_to_mrb_int(mrb_state *mrb, size_t sz)
   return (mrb_int)sz;
 }
 
-mrb_int
+static mrb_int
 compute_capacity(mrb_state *mrb, size_t stack_size, size_t buf_size)
 {
   mrb_int s = safe_size_to_mrb_int(mrb, stack_size);
@@ -115,13 +115,12 @@ MRB_CPP_DEFINE_TYPE(mrb_msgpack_ctx, mrb_msgpack_ctx);
 #define MRB_MSGPACK_DEFAULT_SYMBOL_TYPE 0U
 #endif
 
-#define MRB_MSGPACK_CONTEXT(mrb)                                           \
-  ([mrb]() -> mrb_msgpack_ctx* {                                           \
-    mrb_value v = mrb_gv_get((mrb), MRB_SYM(__msgpack__ctx));              \
-    mrb_assert(mrb_cptr_p(v));                                             \
-    return static_cast<mrb_msgpack_ctx*>(mrb_cptr(v));                     \
-  }())
-
+#define MRB_MSGPACK_CONTEXT(mrb)                                          \
+  ([](mrb_state* _m) -> mrb_msgpack_ctx* {                                \
+    mrb_value _v = mrb_gv_get(_m, MRB_SYM(__msgpack__ctx));               \
+    mrb_assert(mrb_cptr_p(_v));                                           \
+    return static_cast<mrb_msgpack_ctx*>(mrb_cptr(_v));                   \
+  }(mrb))
 
 static void mrb_msgpack_pack_value(mrb_state* mrb, mrb_value self, msgpack::packer<mrb_msgpack_sbo_writer>& pk);
 static void mrb_msgpack_pack_array_value(mrb_state* mrb, mrb_value self, msgpack::packer<mrb_msgpack_sbo_writer>& pk);
@@ -146,7 +145,7 @@ static mrb_value
 ensure_ext_registry(mrb_state *mrb)
 {
   mrb_value reg = mrb_gv_get(mrb, MRB_SYM(__msgpack_ext_registry__));
-  if (mrb_hash_p(reg)) return reg;
+  if (likely(mrb_hash_p(reg))) return reg;
 
   mrb_value registry   = mrb_hash_new(mrb);
   mrb_value packers    = mrb_hash_new(mrb);
@@ -163,7 +162,7 @@ static mrb_value
 ensure_msgpack_ctx(mrb_state *mrb)
 {
   mrb_value ctxv = mrb_gv_get(mrb, MRB_SYM(__msgpack__ctx));
-  if (mrb_cptr_p(ctxv)) return ctxv;
+  if (likely(mrb_cptr_p(ctxv))) return ctxv;
 
   /* Allocate the C context directly and store as a cptr in a GV.
      This avoids creating any Ruby classes/modules and works with mrb_open_core. */
@@ -177,18 +176,28 @@ ensure_msgpack_ctx(mrb_state *mrb)
   return cptr;
 }
 
-static inline mrb_value
+static mrb_value
 ext_packers_hash(mrb_state *mrb)
 {
   mrb_value registry = ensure_ext_registry(mrb);
-  return mrb_hash_get(mrb, registry, mrb_symbol_value(MRB_SYM(packers)));
+  mrb_value packers = mrb_hash_get(mrb, registry, mrb_symbol_value(MRB_SYM(packers)));
+  if (likely(mrb_hash_p(packers))) {
+    return packers;
+  } else {
+    mrb_raise(mrb, E_RUNTIME_ERROR, "ext packers is not a hash");
+  }
 }
 
-static inline mrb_value
+static mrb_value
 ext_unpackers_hash(mrb_state *mrb)
 {
   mrb_value registry = ensure_ext_registry(mrb);
-  return mrb_hash_get(mrb, registry, mrb_symbol_value(MRB_SYM(unpackers)));
+  mrb_value unpackers = mrb_hash_get(mrb, registry, mrb_symbol_value(MRB_SYM(unpackers)));
+  if (likely(mrb_hash_p(unpackers))) {
+    return unpackers;
+  } else {
+    mrb_raise(mrb, E_RUNTIME_ERROR, "ext unpackers is not a hash");
+  }
 }
 
 MRB_BEGIN_DECL
@@ -207,7 +216,6 @@ mrb_msgpack_ensure(mrb_state *mrb)
 MRB_API void
 mrb_msgpack_register_pack_type_value(mrb_state *mrb, int8_t type, mrb_value klass, mrb_value proc)
 {
-  ensure_ext_registry(mrb);
   if (unlikely(type < 0 || type > 127)) mrb_raise(mrb, E_RANGE_ERROR, "ext type out of range");
   if (unlikely(mrb_type(proc) != MRB_TT_PROC)) mrb_raise(mrb, E_TYPE_ERROR, "packer must be a Proc");
 
@@ -221,7 +229,6 @@ mrb_msgpack_register_pack_type_value(mrb_state *mrb, int8_t type, mrb_value klas
 MRB_API void
 mrb_msgpack_register_unpack_type_value(mrb_state *mrb, int8_t type, mrb_value proc)
 {
-  ensure_ext_registry(mrb);
   if (unlikely(type < 0 || type > 127)) mrb_raise(mrb, E_RANGE_ERROR, "ext type out of range");
   if (unlikely(mrb_type(proc) != MRB_TT_PROC)) mrb_raise(mrb, E_TYPE_ERROR, "unpacker must be a Proc");
 
@@ -239,7 +246,6 @@ mrb_msgpack_register_pack_type_cfunc(mrb_state *mrb,
 {
   if (unlikely(klass == NULL)) mrb_raise(mrb, E_ARGUMENT_ERROR, "klass is NULL");
   if (unlikely(cfunc == NULL)) mrb_raise(mrb, E_ARGUMENT_ERROR, "pack callback cannot be NULL");
-  ensure_ext_registry(mrb);
 
   struct RProc *rproc =
       mrb_proc_new_cfunc_with_env(mrb, cfunc, argc, argv);
@@ -256,7 +262,6 @@ mrb_msgpack_register_unpack_type_cfunc(mrb_state *mrb,
                                        mrb_int argc,
                                        const mrb_value *argv)
 {
-  ensure_ext_registry(mrb);
   if (unlikely(cfunc == NULL)) mrb_raise(mrb, E_ARGUMENT_ERROR, "unpack callback cannot be NULL");
 
   struct RProc *rproc =
@@ -267,19 +272,20 @@ mrb_msgpack_register_unpack_type_cfunc(mrb_state *mrb,
   mrb_msgpack_register_unpack_type_value(mrb, type, proc);
 }
 
-
 MRB_API void
 mrb_msgpack_teardown(mrb_state *mrb)
 {
   mrb_value ctxv = mrb_gv_get(mrb, MRB_SYM(__msgpack__ctx));
+
+  mrb_gv_remove(mrb, MRB_SYM(__msgpack_ext_registry__));
+  mrb_gv_remove(mrb, MRB_SYM(__msgpack__ctx));
+
   if (likely(mrb_cptr_p(ctxv))) {
     void *p = mrb_cptr(ctxv);
     mrb_free(mrb, p);
   }
-
-  mrb_gv_remove(mrb, MRB_SYM(__msgpack_ext_registry__));
-  mrb_gv_remove(mrb, MRB_SYM(__msgpack__ctx));
 }
+
 MRB_END_DECL
 /* ------------------------------------------------------------------------
  * Primitive packers
@@ -369,13 +375,7 @@ mrb_msgpack_pack_symbol_value_as_raw(mrb_state* mrb,
 static mrb_value
 mrb_msgpack_get_ext_config(mrb_state* mrb, mrb_value obj)
 {
-  /* use GV-backed registry instead of MessagePack::_ExtPackers constant */
   mrb_value ext_packers = ext_packers_hash(mrb);
-
-  if (unlikely(!mrb_hash_p(ext_packers))) {
-    mrb_raise(mrb, E_TYPE_ERROR, "ext packers is not a hash");
-  }
-
   mrb_value obj_class = mrb_obj_value(mrb_obj_class(mrb, obj));
   mrb_value ext_config = mrb_hash_get(mrb, ext_packers, obj_class);
 
@@ -417,11 +417,11 @@ mrb_msgpack_get_ext_config(mrb_state* mrb, mrb_value obj)
 }
 
 static mrb_bool
-mrb_msgpack_pack_ext_value(mrb_state* mrb, mrb_value self, msgpack::packer<mrb_msgpack_sbo_writer>& pk)
+mrb_msgpack_pack_ext_value(mrb_state* mrb, mrb_value obj, msgpack::packer<mrb_msgpack_sbo_writer>& pk)
 {
   mrb_int arena_index = mrb_gc_arena_save(mrb);
 
-  mrb_value ext_config = mrb_msgpack_get_ext_config(mrb, self);
+  mrb_value ext_config = mrb_msgpack_get_ext_config(mrb, obj);
   if (!mrb_hash_p(ext_config)) {
     mrb_gc_arena_restore(mrb, arena_index);
     return FALSE;
@@ -433,7 +433,7 @@ mrb_msgpack_pack_ext_value(mrb_state* mrb, mrb_value self, msgpack::packer<mrb_m
     mrb_raise(mrb, E_TYPE_ERROR, "malformed packer");
   }
 
-  mrb_value packed = mrb_yield(mrb, packer, self);
+  mrb_value packed = mrb_yield(mrb, packer, obj);
   if (unlikely(!mrb_string_p(packed))) {
     mrb_gc_arena_restore(mrb, arena_index);
     mrb_raise(mrb, E_TYPE_ERROR, "no string returned by ext type packer");
@@ -705,7 +705,7 @@ mrb_msgpack_register_pack_type(mrb_state* mrb, mrb_value self)
   ext_packers = ext_packers_hash(mrb);
   ext_config = mrb_hash_new_capa(mrb, 2);
 
-  mrb_hash_set(mrb, ext_config, mrb_symbol_value(MRB_SYM(type)),   mrb_int_value(mrb, type));
+  mrb_hash_set(mrb, ext_config, mrb_symbol_value(MRB_SYM(type)),   mrb_convert_number(mrb, type));
   mrb_hash_set(mrb, ext_config, mrb_symbol_value(MRB_SYM(packer)), block);
   mrb_hash_set(mrb, ext_packers, mrb_class, ext_config);
 
@@ -808,7 +808,7 @@ mrb_unpack_msgpack_obj(mrb_state* mrb, const msgpack::object& obj)
         );
       }
       else {
-        mrb_raisef(mrb, E_MSGPACK_ERROR, "Cannot unpack ext type %S", ext_type);
+        mrb_raisef(mrb, E_MSGPACK_ERROR, "Cannot unpack ext type %d", ext_type);
       }
     }
 
@@ -888,7 +888,7 @@ mrb_msgpack_unpack_m(mrb_state* mrb, mrb_value self)
           break;
         }
       }
-      return mrb_int_value(mrb, (mrb_int)off);
+      return mrb_convert_number(mrb, (mrb_int)off);
     }
     else {
       msgpack::object_handle oh = msgpack::unpack(buf, len, off);
@@ -980,20 +980,55 @@ mrb_msgpack_unpack_lazy_m(mrb_state *mrb, mrb_value self)
  * ------------------------------------------------------------------------ */
 
 static std::string_view
-unescape_json_pointer_sv(std::string_view s, std::string &scratch)
+unescape_json_pointer_sv(std::string_view in, std::string &scratch)
 {
   scratch.clear();
-  scratch.reserve(s.size());
+  scratch.reserve(in.size());
 
-  for (size_t i = 0; i < s.size(); ++i) {
-    if (s[i] == '~' && i + 1 < s.size()) {
-      if (s[i + 1] == '0') { scratch.push_back('~'); ++i; continue; }
-      if (s[i + 1] == '1') { scratch.push_back('/'); ++i; continue; }
+  for (size_t i = 0; i < in.size(); ++i) {
+    char c = in[i];
+    if (c == '~' && i + 1 < in.size()) {
+      char n = in[i + 1];
+      if (n == '0') { scratch.push_back('~'); ++i; continue; }
+      if (n == '1') { scratch.push_back('/'); ++i; continue; }
     }
-    scratch.push_back(s[i]);
+    scratch.push_back(c);
   }
 
-  return std::string_view(scratch);
+  return std::string_view(scratch.data(), scratch.size());
+}
+
+static bool
+parse_array_index(std::string_view token, size_t &out_idx, std::string &errmsg)
+{
+  if (token.empty()) {
+    errmsg = "Empty array index";
+    return false;
+  }
+
+  if (token[0] == '-' || token[0] == '+') {
+    errmsg = "Invalid array index: " + std::string(token);
+    return false;
+  }
+
+  size_t idx = 0;
+  for (char c : token) {
+    if (c < '0' || c > '9') {
+      errmsg = "Invalid array index: " + std::string(token);
+      return false;
+    }
+    size_t digit = static_cast<size_t>(c - '0');
+
+    if (idx > (std::numeric_limits<size_t>::max() - digit) / 10) {
+      errmsg = "Array index overflow: " + std::string(token);
+      return false;
+    }
+
+    idx = idx * 10 + digit;
+  }
+
+  out_idx = idx;
+  return true;
 }
 
 static mrb_value
@@ -1004,7 +1039,7 @@ mrb_msgpack_object_handle_at_pointer(mrb_state *mrb, mrb_value self)
 
   std::string_view pointer(RSTRING_PTR(str), RSTRING_LEN(str));
 
-  auto* handle = (msgpack_object_handle*)mrb_data_get_ptr(mrb, self, &msgpack_object_handle_type);
+  auto *handle = (msgpack_object_handle*)mrb_data_get_ptr(mrb, self, &msgpack_object_handle_type);
   if (unlikely(!handle)) {
     mrb_raise(mrb, E_MSGPACK_ERROR, "ObjectHandle is not initialized");
     return mrb_undef_value();
@@ -1020,16 +1055,17 @@ mrb_msgpack_object_handle_at_pointer(mrb_state *mrb, mrb_value self)
     mrb_raise(mrb, E_ARGUMENT_ERROR, "JSON Pointer must start with '/'");
     return mrb_undef_value();
   }
-  pointer.remove_prefix(1); /* skip leading '/' */
+  pointer.remove_prefix(1);
 
   std::string scratch;
+  std::string errmsg;
 
   while (!pointer.empty()) {
     size_t pos = pointer.find('/');
-    std::string_view token_view =
+    std::string_view raw_token =
       (pos == std::string_view::npos) ? pointer : pointer.substr(0, pos);
 
-    token_view = unescape_json_pointer_sv(token_view, scratch);
+    std::string_view token_view = unescape_json_pointer_sv(raw_token, scratch);
 
     if (current->type == msgpack::type::MAP) {
       bool found = false;
@@ -1037,36 +1073,37 @@ mrb_msgpack_object_handle_at_pointer(mrb_state *mrb, mrb_value self)
       for (uint32_t i = 0; i < current->via.map.size; ++i) {
         const auto &kv = current->via.map.ptr[i];
 
-        if (kv.key.type == msgpack::type::STR &&
-            token_view == std::string_view(kv.key.via.str.ptr,
-                                           kv.key.via.str.size)) {
-          current = &kv.val;
-          found = true;
-          break;
+        if (kv.key.type == msgpack::type::STR) {
+          std::string_view key_view(kv.key.via.str.ptr,
+                                    kv.key.via.str.size);
+          if (token_view == key_view) {
+            current = &kv.val;
+            found = true;
+            break;
+          }
         }
       }
 
       if (!found) {
-        mrb_raise(mrb, E_KEY_ERROR,
-                  ("Key not found: " + std::string(token_view)).c_str());
+        std::string msg = "Key not found: ";
+        msg.append(token_view.data(), token_view.size());
+        mrb_raise(mrb, E_KEY_ERROR, msg.c_str());
         return mrb_undef_value();
       }
     }
     else if (current->type == msgpack::type::ARRAY) {
-      long idx = 0;
+      size_t idx = 0;
+      errmsg.clear();
 
-      for (char c : token_view) {
-        if (c < '0' || c > '9') {
-          mrb_raise(mrb, E_INDEX_ERROR,
-                    ("Invalid array index: " + std::string(token_view)).c_str());
-          return mrb_undef_value();
-        }
-        idx = idx * 10 + (c - '0');
+      if (!parse_array_index(token_view, idx, errmsg)) {
+        mrb_raise(mrb, E_INDEX_ERROR, errmsg.c_str());
+        return mrb_undef_value();
       }
 
-      if (idx < 0 || (size_t)idx >= current->via.array.size) {
-        mrb_raise(mrb, E_INDEX_ERROR,
-                  ("Invalid array index: " + std::string(token_view)).c_str());
+      if (idx >= current->via.array.size) {
+        std::string msg = "Invalid array index: ";
+        msg.append(token_view.data(), token_view.size());
+        mrb_raise(mrb, E_INDEX_ERROR, msg.c_str());
         return mrb_undef_value();
       }
 
@@ -1077,12 +1114,15 @@ mrb_msgpack_object_handle_at_pointer(mrb_state *mrb, mrb_value self)
       return mrb_undef_value();
     }
 
-    if (pos == std::string_view::npos) break;
+    if (pos == std::string_view::npos) {
+      break;
+    }
     pointer.remove_prefix(pos + 1);
   }
 
   return mrb_unpack_msgpack_obj(mrb, *current);
 }
+
 
 /* ------------------------------------------------------------------------
  * Ext unpacker registration
@@ -1118,7 +1158,7 @@ mrb_msgpack_register_unpack_type(mrb_state* mrb, mrb_value self)
   // Otherwise: safe to register
   mrb_hash_set(mrb,
                ext_unpackers_hash(mrb),
-               mrb_int_value(mrb, type),
+               mrb_convert_number(mrb, type),
                block);
 
   return mrb_nil_value();
@@ -1135,7 +1175,7 @@ mrb_msgpack_ext_unpacker_registered(mrb_state *mrb, mrb_value self)
     !mrb_nil_p(
       mrb_hash_get(mrb,
                    ext_unpackers_hash(mrb),
-                   mrb_int_value(mrb, type))
+                   mrb_convert_number(mrb, type))
     )
   );
 }
@@ -1181,14 +1221,14 @@ mrb_msgpack_get_symbol_strategy(mrb_state *mrb)
   if (ctx->sym_unpacker == mrb_msgpack_unpack_symbol_as_string) {
     mrb_value ary = mrb_ary_new_capa(mrb, 2);
     mrb_ary_push(mrb, ary, mrb_symbol_value(MRB_SYM(string)));
-    mrb_ary_push(mrb, ary, mrb_int_value(mrb, ctx->ext_type));
+    mrb_ary_push(mrb, ary, mrb_convert_number(mrb, ctx->ext_type));
     return ary;
   }
 
   if (ctx->sym_unpacker == mrb_msgpack_unpack_symbol_as_int) {
     mrb_value ary = mrb_ary_new_capa(mrb, 2);
     mrb_ary_push(mrb, ary, mrb_symbol_value(MRB_SYM(int)));
-    mrb_ary_push(mrb, ary, mrb_int_value(mrb, ctx->ext_type));
+    mrb_ary_push(mrb, ary, mrb_convert_number(mrb, ctx->ext_type));
     return ary;
   }
 
@@ -1217,100 +1257,363 @@ mrb_msgpack_sym_strategy(mrb_state *mrb, mrb_value self)
   return self;
 }
 
+class ClassCacheLfu {
+public:
+  static constexpr uint16_t NIL       = UINT16_MAX;
+  static constexpr uint16_t MAX_FREQ  = 255;
+  static constexpr uint16_t MAX_SIZE  = 128;
+  static constexpr uint16_t INDEX_CAP = 256; // power-of-two
+  static constexpr uint16_t KEY_MAX   = 64;  // max. Länge des Klassennamens
+
+  struct Entry {
+    char     key[KEY_MAX]; // eigene Kopie
+    uint8_t  key_len;      // 0..64
+    uint16_t freq;
+    uint16_t prev;
+    uint16_t next;
+    // ~70–72 Bytes, 128 Einträge ≈ 9 KB
+  };
+
+  struct Bucket {
+    uint16_t head = NIL;
+    uint16_t tail = NIL;
+  };
+
+  struct Slot {
+    uint32_t hash = 0;
+    uint16_t idx  = NIL;
+    bool     used = false;
+  };
+
+
+  Entry    entries[MAX_SIZE]{};
+  uint16_t count = 0;
+
+  Bucket   buckets[MAX_FREQ + 1]{};
+  uint16_t min_freq = 1;
+
+  Slot     index[INDEX_CAP]{};
+
+  // für spätes Löschen im Ruby-Hash
+  uint16_t last_evicted_idx = NIL;
+  bool     had_eviction     = false;
+
+  ClassCacheLfu()  = default;
+  ~ClassCacheLfu() = default;
+
+  void touch(uint16_t idx) {
+    uint16_t old_freq = entries[idx].freq;
+    bucket_remove(idx);
+
+    if (buckets[old_freq].head == NIL && old_freq == min_freq) {
+      if (min_freq < MAX_FREQ) min_freq++;
+    }
+
+    uint16_t new_freq = old_freq < MAX_FREQ ? old_freq + 1 : MAX_FREQ;
+    bucket_insert(idx, new_freq);
+  }
+
+  void insert(const char* key_ptr, uint16_t key_len) {
+    if (key_len > KEY_MAX) {
+      return; // zu lang → nicht cachen
+    }
+
+    uint16_t idx;
+    if (count < MAX_SIZE) {
+      idx = count++;
+    } else {
+      idx = evict_one();
+      if (idx == NIL) {
+        mrb_assert(false && "LFU evict_one() returned NIL in insert");
+        return; // Release: kein Cache-Eintrag, aber kein Crash
+      }
+    }
+
+    Entry &e = entries[idx];
+    std::memcpy(e.key, key_ptr, key_len);
+    e.key_len = (uint8_t)key_len;
+    e.freq    = 1;
+    e.prev    = NIL;
+    e.next    = NIL;
+    min_freq  = 1;
+
+    bucket_insert(idx, 1);
+    index_set(e, idx);
+  }
+
+
+  uint16_t find(const char* key_ptr, uint16_t key_len) const {
+    if (key_len > KEY_MAX) return NIL;
+
+    uint32_t h    = hash(key_ptr, key_len);
+    uint16_t mask = INDEX_CAP - 1;
+
+    for (uint16_t i = 0; i < INDEX_CAP; ++i) {
+      uint16_t slot = (h + i) & mask;
+      const Slot &s = index[slot];
+
+      if (!s.used) return NIL;
+      if (s.hash == h) {
+        const Entry &e = entries[s.idx];
+        if (e.key_len == key_len &&
+            std::memcmp(e.key, key_ptr, key_len) == 0) {
+          return s.idx;
+        }
+      }
+    }
+    return NIL;
+  }
+
+  void evict(mrb_state *mrb, mrb_value class_cache) {
+    if (!had_eviction || last_evicted_idx == NIL) return;
+
+    Entry &e = entries[last_evicted_idx];
+    mrb_value key_str = mrb_str_new_static(mrb, e.key, e.key_len);
+    mrb_hash_delete_key(mrb, class_cache, key_str);
+
+    had_eviction     = false;
+    last_evicted_idx = NIL;
+  }
+
+private:
+  static uint32_t hash(const char* p, uint16_t len) {
+    uint32_t h = 2166136261u;
+    for (uint16_t i = 0; i < len; ++i) {
+      h ^= static_cast<unsigned char>(p[i]);
+      h *= 16777619u;
+    }
+    return h;
+  }
+
+  void index_set(const Entry &e, uint16_t idx) {
+    uint32_t h    = hash(e.key, e.key_len);
+    uint16_t mask = INDEX_CAP - 1;
+
+    int attempts = 0;
+
+    for (;;) {
+      for (uint16_t i = 0; i < INDEX_CAP; ++i) {
+        uint16_t slot = (h + i) & mask;
+        Slot &s = index[slot];
+
+        if (!s.used || (s.hash == h && s.idx == idx)) {
+          s.used = true;
+          s.hash = h;
+          s.idx  = idx;
+          return;
+        }
+      }
+
+      uint16_t victim = evict_one();
+      if (victim == NIL || ++attempts > 4) {
+        mrb_assert(false && "can't find free slot");
+        return;
+      }
+    }
+  }
+
+  void index_erase(const Entry &e) {
+    uint32_t h    = hash(e.key, e.key_len);
+    uint16_t mask = INDEX_CAP - 1;
+
+    for (uint16_t i = 0; i < INDEX_CAP; ++i) {
+      uint16_t slot = (h + i) & mask;
+      Slot &s = index[slot];
+
+      if (!s.used) return;
+      if (s.hash == h && s.idx == (&e - entries)) {
+        s.used = false;
+        return;
+      }
+    }
+  }
+
+  void bucket_remove(uint16_t idx) {
+    Entry  &e = entries[idx];
+    Bucket &b = buckets[e.freq];
+
+    if (e.prev != NIL) entries[e.prev].next = e.next;
+    else b.head = e.next;
+
+    if (e.next != NIL) entries[e.next].prev = e.prev;
+    else b.tail = e.prev;
+
+    e.prev = e.next = NIL;
+  }
+
+  void bucket_insert(uint16_t idx, uint16_t freq) {
+    Bucket &b = buckets[freq];
+    Entry  &e = entries[idx];
+
+    e.freq = freq;
+    e.prev = b.tail;
+    e.next = NIL;
+
+    if (b.tail != NIL) entries[b.tail].next = idx;
+    else b.head = idx;
+
+    b.tail = idx;
+  }
+
+  uint16_t evict_one() {
+    // Suche den nächsten nicht-leeren Bucket ab min_freq
+    uint16_t f = min_freq;
+    while (f <= MAX_FREQ && buckets[f].head == NIL) {
+      ++f;
+    }
+
+    if (f > MAX_FREQ) {
+      // Kein Eintrag zum Evicten → darf eigentlich nicht passieren,
+      // aber wir schützen uns defensiv.
+      return NIL;
+    }
+
+    min_freq = f;
+
+    uint16_t idx = buckets[min_freq].head;
+    if (idx == NIL) {
+      return NIL; // zusätzliche Sicherung
+    }
+
+    Entry &e = entries[idx];
+
+    bucket_remove(idx);
+    index_erase(e);
+
+    last_evicted_idx = idx;
+    had_eviction     = true;
+
+    return idx;
+  }
+
+};
+
+MRB_CPP_DEFINE_TYPE(ClassCacheLfu, class_cache_lfu)
+
+static mrb_value
+class_cache_lfu_initialize(mrb_state *mrb, mrb_value self)
+{
+  mrb_cpp_new<ClassCacheLfu>(mrb, self);
+  return self;
+}
+
+static inline ClassCacheLfu *
+get_lfu(mrb_state *mrb)
+{
+  mrb_value obj = mrb_gv_get(mrb, MRB_SYM(__mrb_actor_class_lfu__));
+  return static_cast<ClassCacheLfu*>(mrb_data_get_ptr(mrb, obj, &class_cache_lfu_type));
+}
+
 MRB_BEGIN_DECL
 MRB_API mrb_value
 mrb_str_constantize(mrb_state* mrb, mrb_value str)
 {
-    if (unlikely(!mrb_string_p(str))) {
-      mrb_raise(mrb, E_TYPE_ERROR, "constant name must be a String");
+  if (unlikely(!mrb_string_p(str))) {
+    mrb_raise(mrb, E_TYPE_ERROR, "constant name must be a String");
+  }
+
+  using std::string_view;
+
+  const char* ptr = RSTRING_PTR(str);
+  mrb_int len     = RSTRING_LEN(str);
+  string_view full(ptr, len);
+
+  mrb_value class_cache =
+      mrb_gv_get(mrb, MRB_SYM(__mrb_actor_class_cache__));
+
+  ClassCacheLfu *lfu = get_lfu(mrb);
+
+  mrb_value klass = mrb_hash_get(mrb, class_cache, str);
+
+  if (mrb_class_p(klass)) {
+    uint16_t idx = lfu->find(ptr, (uint16_t)len);
+    if (idx != ClassCacheLfu::NIL) {
+      lfu->touch(idx);
+    } else {
+      lfu->insert(ptr, (uint16_t)len);
     }
-    using std::string_view;
+    return klass;
+  }
 
-    const char* ptr = RSTRING_PTR(str);
-    mrb_int len     = RSTRING_LEN(str);
-    string_view full(ptr, len);
+  auto name_error = [&](string_view msg) {
+    mrb_raisef(mrb, E_NAME_ERROR, msg.data(), str);
+  };
 
-    auto name_error = [&](string_view msg) {
-        mrb_raisef(mrb, E_NAME_ERROR, msg.data(), str);
-    };
+  if (full.empty()) {
+    name_error("wrong constant name %S");
+  }
 
-    // Reject empty
+  if (full == "::") {
+    name_error("wrong constant name %S");
+  }
+
+  mrb_value current = mrb_obj_value(mrb->object_class);
+
+  if (full.size() >= 2 && full.substr(0, 2) == "::") {
+    full.remove_prefix(2);
     if (full.empty()) {
-        name_error("wrong constant name %S");
+      name_error("wrong constant name %S");
+    }
+  }
+
+  std::vector<string_view> segments;
+  size_t start = 0;
+
+  while (start <= full.size()) {
+    size_t pos = full.find("::", start);
+    if (pos == string_view::npos) {
+      segments.emplace_back(full.substr(start));
+      break;
+    }
+    segments.emplace_back(full.substr(start, pos - start));
+    start = pos + 2;
+  }
+
+  for (auto seg : segments) {
+    if (seg.empty()) {
+      name_error("wrong constant name %S");
+    }
+  }
+
+  for (size_t i = 0; i < segments.size(); ++i) {
+    string_view seg = segments[i];
+
+    mrb_sym sym = mrb_intern(mrb, seg.data(),
+                             static_cast<mrb_int>(seg.size()));
+
+    if (!mrb_const_defined_at(mrb, current, sym)) {
+      name_error("uninitialized constant %S");
     }
 
-    // Reject "::"
-    if (full == "::") {
-        name_error("wrong constant name %S");
+    mrb_value cnst = mrb_const_get(mrb, current, sym);
+
+    bool last = (i + 1 == segments.size());
+    if (!last) {
+      enum mrb_vtype t = mrb_type(cnst);
+      bool ok =
+          (t == MRB_TT_CLASS  ||
+           t == MRB_TT_MODULE ||
+           t == MRB_TT_SCLASS ||
+           t == MRB_TT_ICLASS);
+
+      if (!ok) {
+        mrb_raisef(mrb, E_TYPE_ERROR,
+                   "%S does not refer to class/module",
+                   mrb_str_new(mrb, seg.data(), seg.size()));
+      }
+
+      current = cnst;
+    } else {
+      mrb_hash_set(mrb, class_cache, str, cnst);
+
+      lfu->insert(ptr, (uint16_t)len);
+      lfu->evict(mrb, class_cache);
+
+      return cnst;
     }
+  }
 
-    // Start from Object
-    mrb_value current = mrb_obj_value(mrb->object_class);
-
-    // Handle leading "::"
-    if (full.size() >= 2 && full.substr(0, 2) == "::") {
-        full.remove_prefix(2);
-        if (full.empty()) {
-            name_error("wrong constant name %S");
-        }
-    }
-
-    // Split into segments, preserving empty ones
-    std::vector<string_view> segments;
-    size_t start = 0;
-
-    while (start <= full.size()) {
-        size_t pos = full.find("::", start);
-        if (pos == string_view::npos) {
-            segments.emplace_back(full.substr(start));
-            break;
-        }
-        segments.emplace_back(full.substr(start, pos - start));
-        start = pos + 2;
-    }
-
-    // Reject empty segments (including final)
-    for (auto seg : segments) {
-        if (seg.empty()) {
-            name_error("wrong constant name %S");
-        }
-    }
-
-    // Resolve each segment
-    for (size_t i = 0; i < segments.size(); ++i) {
-        string_view seg = segments[i];
-
-        mrb_sym sym = mrb_intern(mrb, seg.data(),
-                                 static_cast<mrb_int>(seg.size()));
-
-        if (!mrb_const_defined_at(mrb, current, sym)) {
-            name_error("uninitialized constant %S");
-        }
-
-        mrb_value cnst = mrb_const_get(mrb, current, sym);
-
-        bool last = (i + 1 == segments.size());
-        if (!last) {
-            enum mrb_vtype t = mrb_type(cnst);
-            bool ok =
-                (t == MRB_TT_CLASS  ||
-                 t == MRB_TT_MODULE ||
-                 t == MRB_TT_SCLASS ||
-                 t == MRB_TT_ICLASS);
-
-            if (!ok) {
-                mrb_raisef(mrb, E_TYPE_ERROR,
-                           "%S does not refer to class/module",
-                           mrb_str_new(mrb, seg.data(), seg.size()));
-            }
-
-            current = cnst;
-        } else {
-            return cnst;
-        }
-    }
-
-    return current; // unreachable
+  return current; // unreachable
 }
 
 /* ------------------------------------------------------------------------
@@ -1375,7 +1678,7 @@ mrb_mruby_simplemsgpack_gem_init(mrb_state* mrb)
   /* Constants */
   mrb_define_const_id(mrb, msgpack_mod,
                       MRB_SYM(LibMsgPackCVersion),
-                      mrb_str_new_lit(mrb, MSGPACK_VERSION));
+                      mrb_str_new_lit_frozen(mrb, MSGPACK_VERSION));
 
   /* Module functions */
   mrb_define_module_function_id(mrb, msgpack_mod,
@@ -1426,6 +1729,22 @@ mrb_mruby_simplemsgpack_gem_init(mrb_state* mrb)
 
   /* Ensure GV-backed registry + ctx are initialized so Ruby and C APIs share state */
   mrb_msgpack_ensure(mrb);
+
+  mrb_value class_cache = mrb_hash_new(mrb);
+  mrb_gv_set(mrb, MRB_SYM(__mrb_actor_class_cache__), class_cache);
+
+  struct RClass *lfu_class =
+      mrb_define_class_under_id(mrb, msgpack_mod, MRB_SYM(__ClassCacheLfu), mrb->object_class);
+
+  MRB_SET_INSTANCE_TT(lfu_class, MRB_TT_DATA);
+
+  mrb_define_method_id(
+      mrb, lfu_class, MRB_SYM(initialize),
+      class_cache_lfu_initialize,
+      MRB_ARGS_NONE());
+
+  mrb_value lfu_obj = mrb_obj_new(mrb, lfu_class, 0, NULL);
+  mrb_gv_set(mrb, MRB_SYM(__mrb_actor_class_lfu__), lfu_obj);
 }
 
 void
