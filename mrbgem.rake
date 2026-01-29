@@ -13,6 +13,8 @@ MRuby::Gem::Specification.new('mruby-simplemsgpack') do |spec|
   spec.add_dependency 'mruby-string-is-utf8'
   spec.add_dependency 'mruby-c-ext-helpers'
   spec.add_conflict   'mruby-msgpack'
+  spec.add_test_dependency 'mruby-string-ext'
+  spec.add_test_dependency 'mruby-random'
   spec.cxx.flags << '-std=c++17' if spec.cxx.flags && !spec.cxx.flags.include?('-std=c++17')
 
   include_dir = File.join(spec.build_dir, 'include')

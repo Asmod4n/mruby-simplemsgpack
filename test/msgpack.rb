@@ -231,7 +231,7 @@ assert("MessagePack: ext packer without unpacker") do
   end
 
   # Nur Pack‑Type registrieren, KEIN Unpack‑Type
-  MessagePack.register_pack_type(42, Foo) do |obj|
+  MessagePack.register_pack_type(126, Foo) do |obj|
     "FOO:#{obj.object_id}"
   end
 
@@ -587,17 +587,4 @@ assert("MessagePack: JSON Pointer semantic errors") do
   assert_raise(IndexError) { lazy.at_pointer("/a/-1") }
 
   assert_raise(IndexError) { lazy.at_pointer("/a/999") }
-end
-
-assert("MessagePack: unpack ext without unpacker") do
-  class Foo2; end
-
-  MessagePack.register_pack_type(42, Foo2) { "X" }
-
-  foo = Foo2.new
-  packed = foo.to_msgpack
-
-  assert_raise(MessagePack::Error) do
-    MessagePack.unpack(packed)
-  end
 end
