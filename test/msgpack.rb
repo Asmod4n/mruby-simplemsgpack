@@ -588,3 +588,137 @@ assert("MessagePack: JSON Pointer semantic errors") do
 
   assert_raise(IndexError) { lazy.at_pointer("/a/999") }
 end
+
+assert("MessagePack::TimestampExt roundtrip") do
+  # 32-bit format: nsec = 0, sec < 2^32
+  t32 = Time.at(1_234_567_890, 0)
+  packed = MessagePack.pack(t32)
+  unpacked = MessagePack.unpack(packed)
+  assert_equal t32.to_i, unpacked.to_i
+  assert_equal t32.nsec, unpacked.nsec
+
+  # 64-bit format: sec < 2^34, nsec < 1e9
+  t64 = Time.at((1 << 33) + 123, 456_789)
+  packed = MessagePack.pack(t64)
+  unpacked = MessagePack.unpack(packed)
+  assert_equal t64.to_i, unpacked.to_i
+  assert_equal t64.nsec, unpacked.nsec
+
+  # 96-bit format: sec >= 2^34
+  t96 = Time.at((1 << 40) + 5, 123_456)
+  packed = MessagePack.pack(t96)
+  unpacked = MessagePack.unpack(packed)
+  assert_equal t96.to_i, unpacked.to_i
+  assert_equal t96.nsec, unpacked.nsec
+
+  # negative times → always 96-bit
+  tneg = Time.at(-123456789, 987654)
+  packed = MessagePack.pack(tneg)
+  unpacked = MessagePack.unpack(packed)
+  assert_equal tneg.to_i, unpacked.to_i
+  assert_equal tneg.nsec, unpacked.nsec
+
+
+  # registering a packer for Time must raise
+  assert_raise(RangeError) do
+    MessagePack.register_pack_type(-1, Time) { |t| "nope" }
+  end
+end
+
+assert("MessagePack::TimestampExt: 32/64/96-bit formats") do
+  #
+  # 32‑bit timestamp (fixext 4)
+  # sec fits in uint32, nsec == 0
+  #
+  t32 = Time.at(1454932800, 0) # 2016-02-08 12:00:00 UTC
+  vec32 = MessagePack.pack(t32)
+  assert_equal 6, vec32.bytesize
+  assert_equal 0xd6, vec32.bytes[0]  # fixext 4
+  assert_equal 0xff, vec32.bytes[1]  # type -1
+  t32u = MessagePack.unpack(vec32)
+  assert_equal t32.to_i, t32u.to_i
+  assert_equal t32.nsec, t32u.nsec
+
+  #
+  # 64‑bit timestamp (fixext 8)
+  # sec < 2^34, nsec < 1e9, but nsec != 0
+  #
+  t64 = Time.at(1454932800, 123_456) # force 64-bit (nsec != 0)
+  vec64 = MessagePack.pack(t64)
+  assert_equal 10, vec64.bytesize
+  assert_equal 0xd7, vec64.bytes[0]  # fixext 8
+  assert_equal 0xff, vec64.bytes[1]  # type -1
+  t64u = MessagePack.unpack(vec64)
+  assert_equal t64.to_i, t64u.to_i
+  assert_equal t64.nsec, t64u.nsec
+
+  #
+  # 96‑bit timestamp (ext 12)
+  # sec >= 2^34 OR negative OR nsec >= 1e9
+  #
+  t96 = Time.at((1 << 40) + 5, 987_654) # sec forces 96-bit
+  vec96 = MessagePack.pack(t96)
+  assert_equal 15, vec96.bytesize
+  assert_equal 0xc7, vec96.bytes[0]  # ext 8/16/32 header
+  assert_equal 0x0c, vec96.bytes[1]  # 12 bytes body
+  assert_equal 0xff, vec96.bytes[2]  # type -1
+  t96u = MessagePack.unpack(vec96)
+  assert_equal t96.to_i, t96u.to_i
+  assert_equal t96.nsec, t96u.nsec
+end
+
+assert("MessagePack::TimestampExt vectors from file") do
+  path = File.join(File.dirname(__FILE__), "timestamp_vectors.bin")
+  data = File.read(path)
+
+  # Die Datei enthält:
+  #   ts32_body (4 bytes)
+  #   ts64_body (8 bytes)
+  #   ts96_body (12 bytes)
+  #
+  # Reihenfolge exakt wie im Python-Script
+
+  off = 0
+
+  # --- 32-bit Timestamp ---
+  body32 = data[off, 4]
+  off += 4
+
+  vec32 = [
+    0xD6,       # fixext 4
+    0xFF        # type -1
+  ].pack("C*") + body32
+
+  t32 = MessagePack.unpack(vec32)
+  assert_equal 1, t32.to_i
+  assert_equal 0, t32.nsec
+
+
+  # --- 64-bit Timestamp ---
+  body64 = data[off, 8]
+  off += 8
+
+  vec64 = [
+    0xD7,       # fixext 8
+    0xFF        # type -1
+  ].pack("C*") + body64
+
+  t64 = MessagePack.unpack(vec64)
+  assert_equal 1, t64.to_i
+  assert_equal 500_000_000, t64.nsec
+
+
+  # --- 96-bit Timestamp ---
+  body96 = data[off, 12]
+  off += 12
+
+  vec96 = [
+    0xC7,       # ext
+    0x0C,       # size = 12
+    0xFF        # type -1
+  ].pack("C*") + body96
+
+  t96 = MessagePack.unpack(vec96)
+  assert_equal(-1, t96.to_i)
+  assert_equal 999_999_000, t96.nsec
+end

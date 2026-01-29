@@ -15,6 +15,7 @@
 #include <mruby/presym.h>
 #include <mruby/msgpack.h>
 #include <mruby/proc.h>
+#include <mruby/time.h>
 
 MRB_BEGIN_DECL
 #include <mruby/internal.h>
@@ -523,6 +524,56 @@ mrb_msgpack_pack_hash_value(mrb_state* mrb,
   );
 }
 
+static void
+mrb_msgpack_pack_time_ext(mrb_state* mrb, mrb_value time, msgpack::packer<mrb_msgpack_sbo_writer>& pk)
+{
+    // epoch seconds
+    mrb_int sec_i = mrb_integer(mrb_funcall_argv(mrb, time, MRB_SYM(to_i), 0, nullptr));
+    int64_t sec = (int64_t)sec_i;
+
+    // nanoseconds
+    mrb_int nsec_i = mrb_integer(mrb_funcall_argv(mrb, time, MRB_SYM(nsec), 0, nullptr));
+    int64_t nsec = (int64_t)nsec_i;
+
+    // 32‑bit format
+    if (nsec == 0 && sec >= 0 && sec < (1LL << 32)) {
+        char buf[4];
+        buf[0] = (sec >> 24) & 0xFF;
+        buf[1] = (sec >> 16) & 0xFF;
+        buf[2] = (sec >> 8)  & 0xFF;
+        buf[3] =  sec        & 0xFF;
+
+        pk.pack_ext(4, -1);
+        pk.pack_ext_body(buf, 4);
+        return;
+    }
+
+    // 64‑bit format
+    if (sec >= 0 && sec < (1LL << 34) && nsec >= 0 && nsec < 1000000000) {
+        uint64_t v = ((uint64_t)nsec << 34) | (uint64_t)sec;
+        char buf[8];
+        for (int i = 7; i >= 0; --i) { buf[i] = v & 0xFF; v >>= 8; }
+
+        pk.pack_ext(8, -1);
+        pk.pack_ext_body(buf, 8);
+        return;
+    }
+
+    // 96‑bit format
+    char buf[12];
+    buf[0] = (nsec >> 24) & 0xFF;
+    buf[1] = (nsec >> 16) & 0xFF;
+    buf[2] = (nsec >> 8)  & 0xFF;
+    buf[3] =  nsec        & 0xFF;
+
+    uint64_t s = (uint64_t)sec;
+    for (int i = 11; i >= 4; --i) { buf[i] = s & 0xFF; s >>= 8; }
+
+    pk.pack_ext(12, -1);
+    pk.pack_ext_body(buf, 12);
+}
+
+
 /* ------------------------------------------------------------------------
  * Core pack dispatcher
  * ------------------------------------------------------------------------ */
@@ -570,6 +621,11 @@ mrb_msgpack_pack_value(mrb_state* mrb,
     }  break;
 
     default: {
+      struct RClass *time_class = mrb_class_get_id(mrb, MRB_SYM(Time));
+      if(mrb_obj_is_kind_of(mrb, self, time_class)) {
+        mrb_msgpack_pack_time_ext(mrb, self, pk);
+        break;
+      }
       if (mrb_msgpack_pack_ext_value(mrb, self, pk)) break;
 
       mrb_value v;
@@ -719,6 +775,11 @@ mrb_msgpack_register_pack_type(mrb_state* mrb, mrb_value self)
               "cannot register ext packer for Symbols, use the new MessagePack.sym_strategy function.");
   }
 
+  struct RClass *time_class = mrb_class_get_id(mrb, MRB_SYM(Time));
+  if (mrb_class_ptr(mrb_class) == time_class) {
+    mrb_raise(mrb, E_ARGUMENT_ERROR, "cannot register ext packer for Time, timestamp ext (-1) is reserved");
+  }
+
   ext_packers = ext_packers_hash(mrb);
   ext_config = mrb_hash_new_capa(mrb, 2);
 
@@ -769,6 +830,56 @@ mrb_msgpack_unpack_symbol_as_string(mrb_state* mrb, const msgpack::object& obj)
   );
 }
 
+static mrb_value
+mrb_msgpack_unpack_timestamp(mrb_state* mrb, const msgpack::object& obj)
+{
+  const char* p = obj.via.ext.data();
+  uint32_t size = obj.via.ext.size;
+
+  switch (size) {
+    case 4: {
+      uint32_t sec =
+        ((uint32_t)(uint8_t)p[0] << 24) |
+        ((uint32_t)(uint8_t)p[1] << 16) |
+        ((uint32_t)(uint8_t)p[2] << 8)  |
+        ((uint32_t)(uint8_t)p[3]);
+      return mrb_time_at(mrb, (time_t)sec, 0, MRB_TIMEZONE_UTC);
+    }
+
+    case 8: {
+      uint64_t v = 0;
+      for (int i = 0; i < 8; ++i) v = (v << 8) | (uint8_t)p[i];
+
+      // top 30 bits = nanoseconds
+      uint32_t nsec = (v >> 34) & 0x3fffffff;  // mask top 30 bits
+      uint64_t sec  = v & 0x3ffffffff;          // mask lower 34 bits
+
+      // nsec ist uint64_t aus 64-bit oder 32-bit Timestamp
+      mrb_int usec = (mrb_int)(nsec / 1000);  // Nanoseconds → Microseconds
+
+      return mrb_time_at(mrb, (time_t)sec, usec, MRB_TIMEZONE_UTC);
+    }
+
+    case 12: {
+      uint32_t nsec =
+        ((uint32_t)(uint8_t)p[0] << 24) |
+        ((uint32_t)(uint8_t)p[1] << 16) |
+        ((uint32_t)(uint8_t)p[2] << 8)  |
+        ((uint32_t)(uint8_t)p[3]);
+
+      uint64_t sec = 0;
+      for (int i = 4; i < 12; ++i) sec = (sec << 8) | (uint8_t)p[i];
+
+      return mrb_time_at(mrb, (time_t)sec, (time_t)(nsec / 1000), MRB_TIMEZONE_UTC); // divide by 1000 for microseconds
+
+    }
+
+    default:
+      mrb_raise(mrb, E_MSGPACK_ERROR, "invalid timestamp ext length");
+  }
+}
+
+
 /* ------------------------------------------------------------------------
  * Core unpack dispatch
  * ------------------------------------------------------------------------ */
@@ -810,6 +921,9 @@ mrb_unpack_msgpack_obj(mrb_state* mrb, const msgpack::object& obj)
       mrb_msgpack_ctx* ctx = MRB_MSGPACK_CONTEXT(mrb);
       if (ext_type == ctx->ext_type && ctx->sym_unpacker != nullptr) {
         return ctx->sym_unpacker(mrb, obj);
+      }
+      if (ext_type == -1) {
+        return mrb_msgpack_unpack_timestamp(mrb, obj);
       }
       mrb_value unpacker = mrb_hash_get(
         mrb,
