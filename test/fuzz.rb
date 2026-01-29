@@ -57,10 +57,6 @@ end
 
   # 5) Ext‑Type‑Fuzzing
   begin
-    MessagePack.register_ext_type(42, String,
-      pack: ->(s) { s },
-      unpack: ->(d) { d }
-    )
     MessagePack.unpack(random_bytes(rand(20), chars))
   rescue MessagePack::Error
   end

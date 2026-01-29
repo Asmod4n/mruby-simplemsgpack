@@ -918,12 +918,12 @@ mrb_unpack_msgpack_obj(mrb_state* mrb, const msgpack::object& obj)
 
     case msgpack::type::EXT: {
       auto ext_type = obj.via.ext.type();
-      mrb_msgpack_ctx* ctx = MRB_MSGPACK_CONTEXT(mrb);
-      if (ext_type == ctx->ext_type && ctx->sym_unpacker != nullptr) {
-        return ctx->sym_unpacker(mrb, obj);
-      }
       if (ext_type == -1) {
         return mrb_msgpack_unpack_timestamp(mrb, obj);
+      }
+      mrb_msgpack_ctx* ctx = MRB_MSGPACK_CONTEXT(mrb);
+      if (ctx->sym_unpacker != nullptr && ext_type == ctx->ext_type) {
+        return ctx->sym_unpacker(mrb, obj);
       }
       mrb_value unpacker = mrb_hash_get(
         mrb,
@@ -1108,11 +1108,18 @@ mrb_msgpack_unpack_lazy_m(mrb_state *mrb, mrb_value self)
       mrb_raise(mrb, E_MSGPACK_ERROR, "ObjectHandle is not initialized");
       return mrb_undef_value();
     }
-
+    msgpack::unpack_limit limit(
+      MSGPACK_ARY_LIMIT,   // array
+      MSGPACK_MAP_LIMIT,   // map
+      MSGPACK_STR_LIMIT,   // str
+      MSGPACK_BIN_LIMIT,   // bin
+      MSGPACK_EXT_LIMIT,   // ext
+      MSGPACK_DEPTH_LIMIT  // depth
+    );
     msgpack::unpack(handle->oh,
                     RSTRING_PTR(data),
                     RSTRING_LEN(data),
-                    handle->off);
+                    handle->off, nullptr, nullptr, limit);
 
     return object_handle;
   }
