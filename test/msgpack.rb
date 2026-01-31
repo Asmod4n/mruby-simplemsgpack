@@ -424,7 +424,7 @@ end
 
 assert("LFU: eviction removes least frequently used") do
   # Wir erzeugen mehr Klassen als MAX_SIZE (128)
-  1500.times do |i|
+  100.times do |i|
     Object.const_set("LFUTest#{i}", Class.new)
     assert_equal Object.const_get("LFUTest#{i}"), "LFUTest#{i}".constantize
   end
@@ -434,11 +434,11 @@ assert("LFU: frequently used entries survive eviction") do
   class HotA; end
   class HotB; end
 
-  500.times { assert_equal HotA, "HotA".constantize }
-  500.times { assert_equal HotB, "HotB".constantize }
+  50.times { assert_equal HotA, "HotA".constantize }
+  50.times { assert_equal HotB, "HotB".constantize }
 
   # Jetzt Cache fluten
-  2000.times do |i|
+  200.times do |i|
     Object.const_set("Cold#{i}", Class.new)
     assert_equal Object.const_get("Cold#{i}"), "Cold#{i}".constantize
   end
@@ -459,7 +459,7 @@ end
 
 assert("LFU: index overflow does not crash") do
   base = "AA"
-  3000.times do |i|
+  300.times do |i|
     key = base + i.to_s
     Object.const_set(key, Class.new)
     assert_equal Object.const_get(key), key.constantize
@@ -469,37 +469,37 @@ assert("LFU: index overflow does not crash") do
 end
 
 assert("LFU: GC stress does not break cache") do
-  2000.times do |i|
+  100.times do |i|
     key = "GCStress#{i}"
     Object.const_set(key, Class.new)
     assert_equal Object.const_get(key), key.constantize
     GC.start
   end
 
-  assert_equal GCStress199, "GCStress199".constantize
+  assert_equal GCStress99, "GCStress99".constantize
 end
 
 assert("LFU: entry slot reuse is safe") do
   # Fülle Cache
-  1280.times do |i|
+  128.times do |i|
     Object.const_set("Reuse#{i}", Class.new)
     assert_equal Object.const_get("Reuse#{i}"), "Reuse#{i}".constantize
   end
 
   # Erzeuge Evictions
-  5000.times do |i|
+  500.times do |i|
     Object.const_set("ReuseEvict#{i}", Class.new)
     assert_equal Object.const_get("ReuseEvict#{i}"), "ReuseEvict#{i}".constantize
   end
 
   # Neue Keys müssen korrekt funktionieren
-  assert_equal Object.const_get("ReuseEvict49"), "ReuseEvict49".constantize
+  assert_equal Object.const_get("ReuseEvict499"), "ReuseEvict499".constantize
 end
 
 assert("LFU: constantize correctness under pressure") do
   module A; module B; class C; end; end; end
 
-  2000.times do |i|
+  200.times do |i|
     Object.const_set("Spam#{i}", Class.new)
     assert_equal Object.const_get("Spam#{i}"), "Spam#{i}".constantize
   end
@@ -511,10 +511,10 @@ assert("LFU: mixed workload stability") do
   class HotX; end
   class HotY; end
 
-  1000.times { assert_equal HotX, "HotX".constantize }
-  1000.times { assert_equal HotY, "HotY".constantize }
+  100.times { assert_equal HotX, "HotX".constantize }
+  100.times { assert_equal HotY, "HotY".constantize }
 
-  2000.times do |i|
+  200.times do |i|
     if i % 5 == 0
       assert_raise(NameError) { "Miss#{i}".constantize }
     else

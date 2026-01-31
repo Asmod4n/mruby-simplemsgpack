@@ -28,7 +28,6 @@ MRB_END_DECL
 
 #include <string>
 #include <string_view>
-#include <atomic>
 #include <cstdint>
 #include <mrbconf.h>
 
@@ -130,7 +129,7 @@ MRB_CPP_DEFINE_TYPE(mrb_msgpack_ctx, mrb_msgpack_ctx);
 
 /* default symbol strategy type (used by ctx) */
 #ifndef MRB_MSGPACK_DEFAULT_SYMBOL_TYPE
-#define MRB_MSGPACK_DEFAULT_SYMBOL_TYPE 0U
+#define MRB_MSGPACK_DEFAULT_SYMBOL_TYPE 0
 #endif
 
 #define MRB_MSGPACK_CONTEXT(mrb) (mrb_cpp_get<mrb_msgpack_ctx>(mrb, mrb_gv_get(mrb, MRB_SYM(__msgpack__ctx))))
@@ -158,12 +157,12 @@ static mrb_value mrb_msgpack_sym_strategy(mrb_state *mrb, mrb_value self);
 static mrb_value
 ensure_ext_registry(mrb_state *mrb)
 {
-  mrb_value reg = mrb_gv_get(mrb, MRB_SYM(__msgpack_ext_registry__));
-  if (likely(mrb_hash_p(reg))) return reg;
+  mrb_value registry = mrb_gv_get(mrb, MRB_SYM(__msgpack_ext_registry__));
+  if (likely(mrb_hash_p(registry))) return registry;
 
-  mrb_value registry   = mrb_hash_new(mrb);
-  mrb_value packers    = mrb_hash_new(mrb);
-  mrb_value unpackers  = mrb_hash_new(mrb);
+  registry   = mrb_hash_new_capa(mrb, 2);
+  mrb_value packers    = mrb_hash_new_capa(mrb, 16);
+  mrb_value unpackers  = mrb_hash_new_capa(mrb, 16);
 
   mrb_hash_set(mrb, registry, mrb_symbol_value(MRB_SYM(packers)),   packers);
   mrb_hash_set(mrb, registry, mrb_symbol_value(MRB_SYM(unpackers)), unpackers);
@@ -211,16 +210,15 @@ public:
   static constexpr uint16_t NIL       = UINT16_MAX;
   static constexpr uint16_t MAX_FREQ  = 255;
   static constexpr uint16_t MAX_SIZE  = 128;
-  static constexpr uint16_t INDEX_CAP = 256; // power-of-two
-  static constexpr uint16_t KEY_MAX   = 64;  // max. Länge des Klassennamens
+  static constexpr uint16_t INDEX_CAP = 256;
+  static constexpr uint16_t KEY_MAX   = 64;
 
   struct Entry {
-    char     key[KEY_MAX]; // eigene Kopie
-    uint8_t  key_len;      // 0..64
+    char     key[KEY_MAX];
+    uint8_t  key_len;
     uint16_t freq;
     uint16_t prev;
     uint16_t next;
-    // ~70–72 Bytes, 128 Einträge ≈ 9 KB
   };
 
   struct Bucket {
@@ -243,7 +241,6 @@ public:
 
   Slot     index[INDEX_CAP]{};
 
-  // für spätes Löschen im Ruby-Hash
   uint16_t last_evicted_idx = NIL;
   bool     had_eviction     = false;
 
@@ -446,12 +443,40 @@ class_cache_lfu_initialize(mrb_state *mrb, mrb_value self)
   return self;
 }
 
+MRB_BEGIN_DECL
+MRB_API void
+mrb_msgpack_class_cache_clear(mrb_state *mrb)
+{
+  // Clear Ruby hash cache
+  mrb_value class_cache = mrb_gv_get(mrb, MRB_SYM(__mrb_msgpack_class_cache__));
+  if (mrb_hash_p(class_cache)) {
+    mrb_hash_clear(mrb, class_cache);
+  }
+
+  // Recreate LFU object
+  struct RClass *lfu_class =
+      mrb_class_get_under_id(mrb, mrb_module_get_id(mrb, MRB_SYM(MessagePack)),
+                          MRB_SYM(__ClassCacheLfu));
+
+  mrb_value new_lfu = mrb_obj_new(mrb, lfu_class, 0, NULL);
+  mrb_gv_set(mrb, MRB_SYM(__mrb_msgpack_class_lfu__), new_lfu);
+  mrb_full_gc(mrb);
+}
+MRB_END_DECL
+
+static mrb_value
+mrb_msgpack_class_cache_clear_m(mrb_state *mrb, mrb_value self)
+{
+  mrb_msgpack_class_cache_clear(mrb);
+  return mrb_nil_value();
+}
+
 static ClassCacheLfu *
 ensure_class_cache_lfu(mrb_state *mrb)
 {
   mrb_value obj = mrb_gv_get(mrb, MRB_SYM(__mrb_msgpack_class_lfu__));
   if(unlikely(mrb_nil_p(obj))) {
-    mrb_value class_cache = mrb_hash_new(mrb);
+    mrb_value class_cache = mrb_hash_new_capa(mrb, 8);
     mrb_gv_set(mrb, MRB_SYM(__mrb_msgpack_class_cache__), class_cache);
 
     struct RClass *lfu_class =
@@ -468,7 +493,7 @@ ensure_class_cache_lfu(mrb_state *mrb)
     mrb_gv_set(mrb, MRB_SYM(__mrb_msgpack_class_lfu__), obj);
   }
 
-  return static_cast<ClassCacheLfu*>(mrb_data_get_ptr(mrb, obj, &class_cache_lfu_type));
+  return mrb_cpp_get<ClassCacheLfu>(mrb, obj);
 }
 
 static mrb_value
@@ -499,10 +524,8 @@ MRB_BEGIN_DECL
 MRB_API void
 mrb_msgpack_ensure(mrb_state *mrb)
 {
-  /* Ensure MessagePack module exists */
   struct RClass *msgpack_mod = mrb_define_module_id(mrb, MRB_SYM(MessagePack));
 
-  /* Ensure MessagePack::Error exists */
   mrb_define_class_under_id(mrb, msgpack_mod, MRB_SYM(Error), E_RUNTIME_ERROR);
   ensure_ext_registry(mrb);
   ensure_msgpack_ctx(mrb);
@@ -512,7 +535,7 @@ mrb_msgpack_ensure(mrb_state *mrb)
 MRB_API void
 mrb_msgpack_register_pack_type_value(mrb_state *mrb, int8_t type, mrb_value klass, mrb_value proc)
 {
-  if (unlikely(type < 0 || type > 127)) mrb_raise(mrb, E_RANGE_ERROR, "ext type out of range");
+  if (unlikely(type < 0)) mrb_raise(mrb, E_RANGE_ERROR, "ext type must bet between 0 and 127");
   if (unlikely(mrb_type(proc) != MRB_TT_PROC)) mrb_raise(mrb, E_TYPE_ERROR, "packer must be a Proc");
 
   mrb_value packers = ext_packers_hash(mrb);
@@ -525,7 +548,7 @@ mrb_msgpack_register_pack_type_value(mrb_state *mrb, int8_t type, mrb_value klas
 MRB_API void
 mrb_msgpack_register_unpack_type_value(mrb_state *mrb, int8_t type, mrb_value proc)
 {
-  if (unlikely(type < 0 || type > 127)) mrb_raise(mrb, E_RANGE_ERROR, "ext type out of range");
+  if (unlikely(type < 0)) mrb_raise(mrb, E_RANGE_ERROR, "ext type must bet between 0 and 127");
   if (unlikely(mrb_type(proc) != MRB_TT_PROC)) mrb_raise(mrb, E_TYPE_ERROR, "unpacker must be a Proc");
 
   mrb_value unpackers = ext_unpackers_hash(mrb);
@@ -884,12 +907,17 @@ mrb_msgpack_pack_value(mrb_state* mrb,
       ctx->sym_packer(mrb, self, ctx->ext_type, pk);
     }  break;
 
-    default: {
+    case MRB_TT_DATA: {
       struct RClass *time_class = mrb_class_get_id(mrb, MRB_SYM(Time));
       if(mrb_obj_is_kind_of(mrb, self, time_class)) {
         mrb_msgpack_pack_time_ext(mrb, self, pk);
         break;
+      } else {
+        goto def;
       }
+    }
+def:
+    default: {
       if (mrb_msgpack_pack_ext_value(mrb, self, pk)) break;
 
       mrb_value v;
@@ -941,12 +969,12 @@ FUNC_NAME(mrb_state* mrb, mrb_value self) {                                    \
 
 /* to_msgpack entrypoints */
 DEFINE_MSGPACK_PACKER(mrb_msgpack_pack_object,  mrb_msgpack_pack_value)
-DEFINE_MSGPACK_PACKER(mrb_msgpack_pack_string,          mrb_msgpack_pack_string_value)
+DEFINE_MSGPACK_PACKER(mrb_msgpack_pack_string,  mrb_msgpack_pack_string_value)
 DEFINE_MSGPACK_PACKER(mrb_msgpack_pack_array,   mrb_msgpack_pack_array_value)
 DEFINE_MSGPACK_PACKER(mrb_msgpack_pack_hash,    mrb_msgpack_pack_hash_value)
-DEFINE_MSGPACK_PACKER(mrb_msgpack_pack_integer,         mrb_msgpack_pack_integer_value)
+DEFINE_MSGPACK_PACKER(mrb_msgpack_pack_integer, mrb_msgpack_pack_integer_value)
 #ifndef MRB_WITHOUT_FLOAT
-DEFINE_MSGPACK_PACKER(mrb_msgpack_pack_float,           mrb_msgpack_pack_float_value)
+DEFINE_MSGPACK_PACKER(mrb_msgpack_pack_float,   mrb_msgpack_pack_float_value)
 #endif
 
 static inline void
@@ -1025,7 +1053,7 @@ mrb_msgpack_register_pack_type(mrb_state* mrb, mrb_value self)
   mrb_get_args(mrb, "iC&", &type, &mrb_class, &block);
 
   if (type < 0 || type > 127) {
-    mrb_raise(mrb, E_RANGE_ERROR, "ext type out of range");
+    mrb_raise(mrb, E_RANGE_ERROR, "ext type must bet between 0 and 127");
   }
   if (mrb_nil_p(block)) {
     mrb_raise(mrb, E_ARGUMENT_ERROR, "no block given");
@@ -1047,7 +1075,7 @@ mrb_msgpack_register_pack_type(mrb_state* mrb, mrb_value self)
   ext_packers = ext_packers_hash(mrb);
   ext_config = mrb_hash_new_capa(mrb, 2);
 
-  mrb_hash_set(mrb, ext_config, mrb_symbol_value(MRB_SYM(type)),   mrb_convert_number(mrb, type));
+  mrb_hash_set(mrb, ext_config, mrb_symbol_value(MRB_SYM(type)),   mrb_fixnum_value(type));
   mrb_hash_set(mrb, ext_config, mrb_symbol_value(MRB_SYM(packer)), block);
   mrb_hash_set(mrb, ext_packers, mrb_class, ext_config);
 
@@ -1345,7 +1373,7 @@ mrb_msgpack_object_handle_new(mrb_state *mrb, mrb_value self)
 static mrb_value
 mrb_msgpack_object_handle_value(mrb_state *mrb, mrb_value self)
 {
-  auto* handle = (msgpack_object_handle*)mrb_data_get_ptr(mrb, self, &msgpack_object_handle_type);
+  auto* handle = mrb_cpp_get<msgpack_object_handle>(mrb, self);
   if (unlikely(!handle)) {
     mrb_raise(mrb, E_MSGPACK_ERROR, "ObjectHandle is not initialized");
     return mrb_undef_value();
@@ -1367,7 +1395,7 @@ mrb_msgpack_unpack_lazy_m(mrb_state *mrb, mrb_value self)
                   mrb_class_get_under_id(mrb, mrb_class_ptr(self), MRB_SYM(_ObjectHandle)),
                   1, &data);
 
-    auto* handle = (msgpack_object_handle*)mrb_data_get_ptr(mrb, object_handle, &msgpack_object_handle_type);
+    auto* handle = mrb_cpp_get<msgpack_object_handle>(mrb, object_handle);
     if (unlikely(!handle)) {
       mrb_raise(mrb, E_MSGPACK_ERROR, "ObjectHandle is not initialized");
       return mrb_undef_value();
@@ -1421,25 +1449,25 @@ unescape_json_pointer_sv(std::string_view in, std::string &scratch)
 static bool
 parse_array_index(std::string_view token, size_t &out_idx, std::string &errmsg)
 {
-  if (token.empty()) {
+  if (unlikely(token.empty())) {
     errmsg = "Empty array index";
     return false;
   }
 
-  if (token[0] == '-' || token[0] == '+') {
+  if (unlikely(token[0] == '-' || token[0] == '+')) {
     errmsg = "Invalid array index: " + std::string(token);
     return false;
   }
 
   size_t idx = 0;
   for (char c : token) {
-    if (c < '0' || c > '9') {
+    if (unlikely(c < '0' || c > '9')) {
       errmsg = "Invalid array index: " + std::string(token);
       return false;
     }
     size_t digit = static_cast<size_t>(c - '0');
 
-    if (idx > (std::numeric_limits<size_t>::max() - digit) / 10) {
+    if (unlikely(idx > (std::numeric_limits<size_t>::max() - digit) / 10)) {
       errmsg = "Array index overflow: " + std::string(token);
       return false;
     }
@@ -1459,7 +1487,7 @@ mrb_msgpack_object_handle_at_pointer(mrb_state *mrb, mrb_value self)
 
   std::string_view pointer(RSTRING_PTR(str), RSTRING_LEN(str));
 
-  auto *handle = (msgpack_object_handle*)mrb_data_get_ptr(mrb, self, &msgpack_object_handle_type);
+  auto *handle = mrb_cpp_get<msgpack_object_handle>(mrb, self);
   if (unlikely(!handle)) {
     mrb_raise(mrb, E_MSGPACK_ERROR, "ObjectHandle is not initialized");
     return mrb_undef_value();
@@ -1471,7 +1499,7 @@ mrb_msgpack_object_handle_at_pointer(mrb_state *mrb, mrb_value self)
     return mrb_unpack_msgpack_obj(mrb, *current);
   }
 
-  if (pointer.front() != '/') {
+  if (unlikely(pointer.front() != '/')) {
     mrb_raise(mrb, E_ARGUMENT_ERROR, "JSON Pointer must start with '/'");
     return mrb_undef_value();
   }
@@ -1504,7 +1532,7 @@ mrb_msgpack_object_handle_at_pointer(mrb_state *mrb, mrb_value self)
         }
       }
 
-      if (!found) {
+      if (unlikely(!found)) {
         std::string msg = "Key not found: ";
         msg.append(token_view.data(), token_view.size());
         mrb_raise(mrb, E_KEY_ERROR, msg.c_str());
@@ -1515,12 +1543,12 @@ mrb_msgpack_object_handle_at_pointer(mrb_state *mrb, mrb_value self)
       size_t idx = 0;
       errmsg.clear();
 
-      if (!parse_array_index(token_view, idx, errmsg)) {
+      if (unlikely(!parse_array_index(token_view, idx, errmsg))) {
         mrb_raise(mrb, E_INDEX_ERROR, errmsg.c_str());
         return mrb_undef_value();
       }
 
-      if (idx >= current->via.array.size) {
+      if (unlikely(idx >= current->via.array.size)) {
         std::string msg = "Invalid array index: ";
         msg.append(token_view.data(), token_view.size());
         mrb_raise(mrb, E_INDEX_ERROR, msg.c_str());
@@ -1557,7 +1585,7 @@ mrb_msgpack_register_unpack_type(mrb_state* mrb, mrb_value self)
   mrb_get_args(mrb, "i&", &type, &block);
 
   if (type < 0 || type > 127) {
-    mrb_raise(mrb, E_RANGE_ERROR, "ext type out of range");
+    mrb_raise(mrb, E_RANGE_ERROR, "ext type must bet between 0 and 127");
   }
   if (mrb_nil_p(block)) {
     mrb_raise(mrb, E_ARGUMENT_ERROR, "no block given");
@@ -1578,7 +1606,7 @@ mrb_msgpack_register_unpack_type(mrb_state* mrb, mrb_value self)
   // Otherwise: safe to register
   mrb_hash_set(mrb,
                ext_unpackers_hash(mrb),
-               mrb_convert_number(mrb, type),
+               mrb_fixnum_value(type),
                block);
 
   return mrb_nil_value();
@@ -1603,30 +1631,34 @@ mrb_msgpack_ext_unpacker_registered(mrb_state *mrb, mrb_value self)
 MRB_API void
 mrb_msgpack_set_symbol_strategy(mrb_state *mrb, mrb_sym which, int8_t ext_type)
 {
+  if (unlikely(ext_type < 0)) {
+    mrb_raise(mrb, E_ARGUMENT_ERROR, "ext type must bet between 0 and 127");
+  }
+
   mrb_msgpack_ctx *ctx = MRB_MSGPACK_CONTEXT(mrb);
 
-  if (which == MRB_SYM(raw)) {
-    ctx->sym_packer   = mrb_msgpack_pack_symbol_value_as_raw;
-    ctx->sym_unpacker = NULL;
-    ctx->ext_type     = 0;
-    return;
-  }
+  switch (which) {
+    case MRB_SYM(raw):
+      ctx->sym_packer   = mrb_msgpack_pack_symbol_value_as_raw;
+      ctx->sym_unpacker = NULL;
+      ctx->ext_type     = 0;
+      break;
 
-  if (which == MRB_SYM(string)) {
-    ctx->sym_packer   = mrb_msgpack_pack_symbol_value_as_string;
-    ctx->sym_unpacker = mrb_msgpack_unpack_symbol_as_string;
-    ctx->ext_type     = ext_type;
-    return;
-  }
+    case MRB_SYM(string):
+      ctx->sym_packer   = mrb_msgpack_pack_symbol_value_as_string;
+      ctx->sym_unpacker = mrb_msgpack_unpack_symbol_as_string;
+      ctx->ext_type     = ext_type;
+      break;
 
-  if (which == MRB_SYM(int)) {
-    ctx->sym_packer   = mrb_msgpack_pack_symbol_value_as_int;
-    ctx->sym_unpacker = mrb_msgpack_unpack_symbol_as_int;
-    ctx->ext_type     = ext_type;
-    return;
-  }
+    case MRB_SYM(int):
+      ctx->sym_packer   = mrb_msgpack_pack_symbol_value_as_int;
+      ctx->sym_unpacker = mrb_msgpack_unpack_symbol_as_int;
+      ctx->ext_type     = ext_type;
+      break;
 
-  mrb_raise(mrb, E_ARGUMENT_ERROR, "unknown symbol strategy");
+    default:
+      mrb_raise(mrb, E_ARGUMENT_ERROR, "unknown symbol strategy");
+  }
 }
 
 MRB_API mrb_value
@@ -1656,7 +1688,6 @@ mrb_msgpack_get_symbol_strategy(mrb_state *mrb)
   return mrb_nil_value();
 }
 
-
 /* ------------------------------------------------------------------------
  * Symbol strategy API (Ruby-visible)
  * ------------------------------------------------------------------------ */
@@ -1675,6 +1706,99 @@ mrb_msgpack_sym_strategy(mrb_state *mrb, mrb_value self)
 
   mrb_msgpack_set_symbol_strategy(mrb, which, ext_type);
   return self;
+}
+
+static mrb_value
+str_constantize(mrb_state* mrb,
+                 mrb_value str,
+                 mrb_value class_cache,
+                 ClassCacheLfu* lfu)
+{
+  using std::string_view;
+
+  const char* ptr = RSTRING_PTR(str);
+  mrb_int len     = RSTRING_LEN(str);
+  string_view full(ptr, len);
+
+  auto name_error = [&](string_view msg) {
+    mrb_raisef(mrb, E_NAME_ERROR, msg.data(), str);
+  };
+
+  if (unlikely(full.empty())) {
+    name_error("wrong constant name %S");
+  }
+
+  if (unlikely(full == "::")) {
+    name_error("wrong constant name %S");
+  }
+
+  mrb_value current = mrb_obj_value(mrb->object_class);
+
+  if (full.size() >= 2 && full.substr(0, 2) == "::") {
+    full.remove_prefix(2);
+    if (unlikely(full.empty())) {
+      name_error("wrong constant name %S");
+    }
+  }
+
+  std::vector<string_view> segments;
+  size_t start = 0;
+
+  while (start <= full.size()) {
+    size_t pos = full.find("::", start);
+    if (pos == string_view::npos) {
+      segments.emplace_back(full.substr(start));
+      break;
+    }
+    segments.emplace_back(full.substr(start, pos - start));
+    start = pos + 2;
+  }
+
+  for (auto seg : segments) {
+    if (unlikely(seg.empty())) {
+      name_error("wrong constant name %S");
+    }
+  }
+
+  for (size_t i = 0; i < segments.size(); ++i) {
+    string_view seg = segments[i];
+
+    mrb_sym sym = mrb_intern(mrb, seg.data(),
+                             static_cast<mrb_int>(seg.size()));
+
+    if (unlikely(!mrb_const_defined_at(mrb, current, sym))) {
+      name_error("uninitialized constant %S");
+    }
+
+    mrb_value cnst = mrb_const_get(mrb, current, sym);
+
+    bool last = (i + 1 == segments.size());
+    if (!last) {
+      enum mrb_vtype t = mrb_type(cnst);
+      bool ok =
+          (t == MRB_TT_CLASS  ||
+           t == MRB_TT_MODULE ||
+           t == MRB_TT_SCLASS ||
+           t == MRB_TT_ICLASS);
+
+      if (unlikely(!ok)) {
+        mrb_raisef(mrb, E_TYPE_ERROR,
+                   "%S does not refer to class/module",
+                   mrb_str_new(mrb, seg.data(), seg.size()));
+      }
+
+      current = cnst;
+    } else {
+      mrb_hash_set(mrb, class_cache, str, cnst);
+
+      lfu->insert(ptr, (uint16_t)len);
+      lfu->evict(mrb, class_cache);
+
+      return cnst;
+    }
+  }
+
+  return current; // unreachable
 }
 
 MRB_BEGIN_DECL
@@ -1706,87 +1830,9 @@ mrb_str_constantize(mrb_state* mrb, mrb_value str)
       lfu->insert(ptr, (uint16_t)len);
     }
     return klass;
+  } else {
+    return str_constantize(mrb, str, class_cache, lfu);
   }
-
-  auto name_error = [&](string_view msg) {
-    mrb_raisef(mrb, E_NAME_ERROR, msg.data(), str);
-  };
-
-  if (full.empty()) {
-    name_error("wrong constant name %S");
-  }
-
-  if (full == "::") {
-    name_error("wrong constant name %S");
-  }
-
-  mrb_value current = mrb_obj_value(mrb->object_class);
-
-  if (full.size() >= 2 && full.substr(0, 2) == "::") {
-    full.remove_prefix(2);
-    if (full.empty()) {
-      name_error("wrong constant name %S");
-    }
-  }
-
-  std::vector<string_view> segments;
-  size_t start = 0;
-
-  while (start <= full.size()) {
-    size_t pos = full.find("::", start);
-    if (pos == string_view::npos) {
-      segments.emplace_back(full.substr(start));
-      break;
-    }
-    segments.emplace_back(full.substr(start, pos - start));
-    start = pos + 2;
-  }
-
-  for (auto seg : segments) {
-    if (seg.empty()) {
-      name_error("wrong constant name %S");
-    }
-  }
-
-  for (size_t i = 0; i < segments.size(); ++i) {
-    string_view seg = segments[i];
-
-    mrb_sym sym = mrb_intern(mrb, seg.data(),
-                             static_cast<mrb_int>(seg.size()));
-
-    if (!mrb_const_defined_at(mrb, current, sym)) {
-      name_error("uninitialized constant %S");
-    }
-
-    mrb_value cnst = mrb_const_get(mrb, current, sym);
-
-    bool last = (i + 1 == segments.size());
-    if (!last) {
-      enum mrb_vtype t = mrb_type(cnst);
-      bool ok =
-          (t == MRB_TT_CLASS  ||
-           t == MRB_TT_MODULE ||
-           t == MRB_TT_SCLASS ||
-           t == MRB_TT_ICLASS);
-
-      if (!ok) {
-        mrb_raisef(mrb, E_TYPE_ERROR,
-                   "%S does not refer to class/module",
-                   mrb_str_new(mrb, seg.data(), seg.size()));
-      }
-
-      current = cnst;
-    } else {
-      mrb_hash_set(mrb, class_cache, str, cnst);
-
-      lfu->insert(ptr, (uint16_t)len);
-      lfu->evict(mrb, class_cache);
-
-      return cnst;
-    }
-  }
-
-  return current; // unreachable
 }
 
 /* ------------------------------------------------------------------------
@@ -1900,8 +1946,12 @@ mrb_mruby_simplemsgpack_gem_init(mrb_state* mrb)
                 mrb_str_constantize,
                 MRB_ARGS_NONE());
 
-  /* Ensure GV-backed registry + ctx are initialized so Ruby and C APIs share state */
   mrb_msgpack_ensure(mrb);
+
+  mrb_define_module_function_id(mrb, msgpack_mod,
+                                MRB_SYM(class_cache_clear),
+                                mrb_msgpack_class_cache_clear_m,
+                                MRB_ARGS_NONE());
 }
 
 void

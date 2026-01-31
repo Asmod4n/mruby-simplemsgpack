@@ -11,6 +11,7 @@ MRB_API mrb_value mrb_msgpack_pack_argv(mrb_state *mrb, mrb_value *argv, mrb_int
 MRB_API mrb_value mrb_msgpack_unpack(mrb_state *mrb, mrb_value data);
 
 MRB_API mrb_value mrb_str_constantize(mrb_state *mrb, mrb_value str);
+MRB_API void mrb_msgpack_class_cache_clear(mrb_state *mrb);
 
 MRB_API void mrb_msgpack_ensure(mrb_state *mrb);
 MRB_API void mrb_msgpack_register_pack_type_value(mrb_state *mrb, int8_t type, mrb_value klass, mrb_value proc);
