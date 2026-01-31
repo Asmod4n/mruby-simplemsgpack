@@ -85,26 +85,26 @@ struct mrb_msgpack_sbo_writer {
     : mrb(mrb) {}
 
   void write(const char* buf, size_t buf_size) {
-    if (mrb_string_p(heap_str)) {
+    if (likely(mrb_undef_p(heap_str) &&
+              buf_size <= STACK_CAP - stack_size)) {
+
+      std::memcpy(stack_buf + stack_size, buf, buf_size);
+      stack_size += buf_size;
+    } else if (mrb_string_p(heap_str)) {
       mrb_str_cat(mrb, heap_str, buf, buf_size);
     } else {
-      if (likely(buf_size <= STACK_CAP - stack_size)) {
-        std::memcpy(stack_buf + stack_size, buf, buf_size);
-        stack_size += buf_size;
-      } else {
-        mrb_int capa = compute_capacity(mrb, stack_size, buf_size);
-        heap_str = mrb_str_new_capa(mrb, capa);
-        mrb_str_cat(mrb, heap_str, stack_buf, stack_size);
-        mrb_str_cat(mrb, heap_str, buf, buf_size);
-      }
+      mrb_int capa = compute_capacity(mrb, stack_size, buf_size);
+      heap_str = mrb_str_new_capa(mrb, capa);
+      mrb_str_cat(mrb, heap_str, stack_buf, stack_size);
+      mrb_str_cat(mrb, heap_str, buf, buf_size);
     }
   }
 
   mrb_value result() {
-    if (mrb_string_p(heap_str)) {
-      return heap_str;
-    } else {
+    if (mrb_undef_p(heap_str)) {
       return mrb_str_new(mrb, stack_buf, stack_size);
+    } else {
+      return heap_str;
     }
   }
 
@@ -112,7 +112,7 @@ private:
   mrb_state* mrb;
 
   static constexpr size_t STACK_CAP = 8 * 1024;
-  char   stack_buf[STACK_CAP] = {0};
+  char   stack_buf[STACK_CAP];
   size_t stack_size      = 0;
   mrb_value heap_str = mrb_undef_value();
 };
@@ -133,12 +133,8 @@ MRB_CPP_DEFINE_TYPE(mrb_msgpack_ctx, mrb_msgpack_ctx);
 #define MRB_MSGPACK_DEFAULT_SYMBOL_TYPE 0U
 #endif
 
-#define MRB_MSGPACK_CONTEXT(mrb)                                          \
-  ([](mrb_state* _m) -> mrb_msgpack_ctx* {                                \
-    mrb_value _v = mrb_gv_get(_m, MRB_SYM(__msgpack__ctx));               \
-    mrb_assert(mrb_cptr_p(_v));                                           \
-    return static_cast<mrb_msgpack_ctx*>(mrb_cptr(_v));                   \
-  }(mrb))
+#define MRB_MSGPACK_CONTEXT(mrb) (mrb_cpp_get<mrb_msgpack_ctx>(mrb, mrb_gv_get(mrb, MRB_SYM(__msgpack__ctx))))
+
 
 static void mrb_msgpack_pack_value(mrb_state* mrb, mrb_value self, msgpack::packer<mrb_msgpack_sbo_writer>& pk);
 static void mrb_msgpack_pack_array_value(mrb_state* mrb, mrb_value self, msgpack::packer<mrb_msgpack_sbo_writer>& pk);
@@ -177,21 +173,302 @@ ensure_ext_registry(mrb_state *mrb)
 }
 
 static mrb_value
-ensure_msgpack_ctx(mrb_state *mrb)
+msgpack_ctx_initialize(mrb_state *mrb, mrb_value self)
 {
-  mrb_value ctxv = mrb_gv_get(mrb, MRB_SYM(__msgpack__ctx));
-  if (likely(mrb_cptr_p(ctxv))) return ctxv;
+  auto ctx = mrb_cpp_new<mrb_msgpack_ctx>(mrb, self);
 
-  /* Allocate the C context directly and store as a cptr in a GV.
-     This avoids creating any Ruby classes/modules and works with mrb_open_core. */
-  mrb_msgpack_ctx *ctx = (mrb_msgpack_ctx*)mrb_malloc(mrb, sizeof(mrb_msgpack_ctx));
   ctx->sym_packer   = mrb_msgpack_pack_symbol_value_as_raw;
   ctx->sym_unpacker = nullptr;
   ctx->ext_type     = (int8_t)MRB_MSGPACK_DEFAULT_SYMBOL_TYPE;
 
-  mrb_value cptr = mrb_cptr_value(mrb, (void*)ctx);
-  mrb_gv_set(mrb, MRB_SYM(__msgpack__ctx), cptr);
-  return cptr;
+  return self;
+}
+
+
+static mrb_value
+ensure_msgpack_ctx(mrb_state *mrb)
+{
+  mrb_value ctxv = mrb_gv_get(mrb, MRB_SYM(__msgpack__ctx));
+  if (likely(mrb_data_p(ctxv))) return ctxv;
+
+  struct RClass *ctx_class =
+      mrb_define_class_under_id(mrb, mrb_module_get_id(mrb, MRB_SYM(MessagePack)), MRB_SYM(__CTX), mrb->object_class);
+
+  MRB_SET_INSTANCE_TT(ctx_class, MRB_TT_DATA);
+
+  mrb_define_method_id(
+      mrb, ctx_class, MRB_SYM(initialize),
+      msgpack_ctx_initialize,
+      MRB_ARGS_NONE());
+  mrb_value ctx_obj = mrb_obj_new(mrb, ctx_class, 0, NULL);
+  mrb_gv_set(mrb, MRB_SYM(__msgpack__ctx), ctx_obj);
+
+  return ctx_obj;
+}
+
+class ClassCacheLfu {
+public:
+  static constexpr uint16_t NIL       = UINT16_MAX;
+  static constexpr uint16_t MAX_FREQ  = 255;
+  static constexpr uint16_t MAX_SIZE  = 128;
+  static constexpr uint16_t INDEX_CAP = 256; // power-of-two
+  static constexpr uint16_t KEY_MAX   = 64;  // max. Länge des Klassennamens
+
+  struct Entry {
+    char     key[KEY_MAX]; // eigene Kopie
+    uint8_t  key_len;      // 0..64
+    uint16_t freq;
+    uint16_t prev;
+    uint16_t next;
+    // ~70–72 Bytes, 128 Einträge ≈ 9 KB
+  };
+
+  struct Bucket {
+    uint16_t head = NIL;
+    uint16_t tail = NIL;
+  };
+
+  struct Slot {
+    uint32_t hash = 0;
+    uint16_t idx  = NIL;
+    bool     used = false;
+  };
+
+
+  Entry    entries[MAX_SIZE]{};
+  uint16_t count = 0;
+
+  Bucket   buckets[MAX_FREQ + 1]{};
+  uint16_t min_freq = 1;
+
+  Slot     index[INDEX_CAP]{};
+
+  // für spätes Löschen im Ruby-Hash
+  uint16_t last_evicted_idx = NIL;
+  bool     had_eviction     = false;
+
+  ClassCacheLfu()  = default;
+  ~ClassCacheLfu() = default;
+
+  void touch(uint16_t idx) {
+    uint16_t old_freq = entries[idx].freq;
+    bucket_remove(idx);
+
+    if (buckets[old_freq].head == NIL && old_freq == min_freq) {
+      if (min_freq < MAX_FREQ) min_freq++;
+    }
+
+    uint16_t new_freq = old_freq < MAX_FREQ ? old_freq + 1 : MAX_FREQ;
+    bucket_insert(idx, new_freq);
+  }
+
+  void insert(const char* key_ptr, uint16_t key_len) {
+    if (key_len > KEY_MAX) {
+      return; // zu lang → nicht cachen
+    }
+
+    uint16_t idx;
+    if (count < MAX_SIZE) {
+      idx = count++;
+    } else {
+      idx = evict_one();
+      if (idx == NIL) {
+        mrb_assert(false && "LFU evict_one() returned NIL in insert");
+        return; // Release: kein Cache-Eintrag, aber kein Crash
+      }
+    }
+
+    Entry &e = entries[idx];
+    std::memcpy(e.key, key_ptr, key_len);
+    e.key_len = (uint8_t)key_len;
+    e.freq    = 1;
+    e.prev    = NIL;
+    e.next    = NIL;
+    min_freq  = 1;
+
+    bucket_insert(idx, 1);
+    index_set(e, idx);
+  }
+
+
+  uint16_t find(const char* key_ptr, uint16_t key_len) const {
+    if (key_len > KEY_MAX) return NIL;
+
+    uint32_t h    = hash(key_ptr, key_len);
+    uint16_t mask = INDEX_CAP - 1;
+
+    for (uint16_t i = 0; i < INDEX_CAP; ++i) {
+      uint16_t slot = (h + i) & mask;
+      const Slot &s = index[slot];
+
+      if (!s.used) return NIL;
+      if (s.hash == h) {
+        const Entry &e = entries[s.idx];
+        if (e.key_len == key_len &&
+            std::memcmp(e.key, key_ptr, key_len) == 0) {
+          return s.idx;
+        }
+      }
+    }
+    return NIL;
+  }
+
+  void evict(mrb_state *mrb, mrb_value class_cache) {
+    if (!had_eviction || last_evicted_idx == NIL) return;
+
+    Entry &e = entries[last_evicted_idx];
+    mrb_value key_str = mrb_str_new_static(mrb, e.key, e.key_len);
+    mrb_hash_delete_key(mrb, class_cache, key_str);
+
+    had_eviction     = false;
+    last_evicted_idx = NIL;
+  }
+
+private:
+  static uint32_t hash(const char* p, uint16_t len) {
+    uint32_t h = 2166136261u;
+    for (uint16_t i = 0; i < len; ++i) {
+      h ^= static_cast<unsigned char>(p[i]);
+      h *= 16777619u;
+    }
+    return h;
+  }
+
+  void index_set(const Entry &e, uint16_t idx) {
+    uint32_t h    = hash(e.key, e.key_len);
+    uint16_t mask = INDEX_CAP - 1;
+
+    int attempts = 0;
+
+    for (;;) {
+      for (uint16_t i = 0; i < INDEX_CAP; ++i) {
+        uint16_t slot = (h + i) & mask;
+        Slot &s = index[slot];
+
+        if (!s.used || (s.hash == h && s.idx == idx)) {
+          s.used = true;
+          s.hash = h;
+          s.idx  = idx;
+          return;
+        }
+      }
+
+      uint16_t victim = evict_one();
+      if (victim == NIL || ++attempts > 4) {
+        mrb_assert(false && "can't find free slot");
+        return;
+      }
+    }
+  }
+
+  void index_erase(const Entry &e) {
+    uint32_t h    = hash(e.key, e.key_len);
+    uint16_t mask = INDEX_CAP - 1;
+
+    for (uint16_t i = 0; i < INDEX_CAP; ++i) {
+      uint16_t slot = (h + i) & mask;
+      Slot &s = index[slot];
+
+      if (!s.used) return;
+      if (s.hash == h && s.idx == (&e - entries)) {
+        s.used = false;
+        return;
+      }
+    }
+  }
+
+  void bucket_remove(uint16_t idx) {
+    Entry  &e = entries[idx];
+    Bucket &b = buckets[e.freq];
+
+    if (e.prev != NIL) entries[e.prev].next = e.next;
+    else b.head = e.next;
+
+    if (e.next != NIL) entries[e.next].prev = e.prev;
+    else b.tail = e.prev;
+
+    e.prev = e.next = NIL;
+  }
+
+  void bucket_insert(uint16_t idx, uint16_t freq) {
+    Bucket &b = buckets[freq];
+    Entry  &e = entries[idx];
+
+    e.freq = freq;
+    e.prev = b.tail;
+    e.next = NIL;
+
+    if (b.tail != NIL) entries[b.tail].next = idx;
+    else b.head = idx;
+
+    b.tail = idx;
+  }
+
+  uint16_t evict_one() {
+    // Suche den nächsten nicht-leeren Bucket ab min_freq
+    uint16_t f = min_freq;
+    while (f <= MAX_FREQ && buckets[f].head == NIL) {
+      ++f;
+    }
+
+    if (f > MAX_FREQ) {
+      // Kein Eintrag zum Evicten → darf eigentlich nicht passieren,
+      // aber wir schützen uns defensiv.
+      return NIL;
+    }
+
+    min_freq = f;
+
+    uint16_t idx = buckets[min_freq].head;
+    if (idx == NIL) {
+      return NIL; // zusätzliche Sicherung
+    }
+
+    Entry &e = entries[idx];
+
+    bucket_remove(idx);
+    index_erase(e);
+
+    last_evicted_idx = idx;
+    had_eviction     = true;
+
+    return idx;
+  }
+
+};
+
+MRB_CPP_DEFINE_TYPE(ClassCacheLfu, class_cache_lfu)
+
+static mrb_value
+class_cache_lfu_initialize(mrb_state *mrb, mrb_value self)
+{
+  mrb_cpp_new<ClassCacheLfu>(mrb, self);
+  return self;
+}
+
+static ClassCacheLfu *
+ensure_class_cache_lfu(mrb_state *mrb)
+{
+  mrb_value obj = mrb_gv_get(mrb, MRB_SYM(__mrb_msgpack_class_lfu__));
+  if(unlikely(mrb_nil_p(obj))) {
+    mrb_value class_cache = mrb_hash_new(mrb);
+    mrb_gv_set(mrb, MRB_SYM(__mrb_msgpack_class_cache__), class_cache);
+
+    struct RClass *lfu_class =
+        mrb_define_class_under_id(mrb, mrb_define_module_id(mrb, MRB_SYM(MessagePack)), MRB_SYM(__ClassCacheLfu), mrb->object_class);
+
+    MRB_SET_INSTANCE_TT(lfu_class, MRB_TT_DATA);
+
+    mrb_define_method_id(
+        mrb, lfu_class, MRB_SYM(initialize),
+        class_cache_lfu_initialize,
+        MRB_ARGS_NONE());
+
+    obj = mrb_obj_new(mrb, lfu_class, 0, NULL);
+    mrb_gv_set(mrb, MRB_SYM(__mrb_msgpack_class_lfu__), obj);
+  }
+
+  return static_cast<ClassCacheLfu*>(mrb_data_get_ptr(mrb, obj, &class_cache_lfu_type));
 }
 
 static mrb_value
@@ -229,6 +506,7 @@ mrb_msgpack_ensure(mrb_state *mrb)
   mrb_define_class_under_id(mrb, msgpack_mod, MRB_SYM(Error), E_RUNTIME_ERROR);
   ensure_ext_registry(mrb);
   ensure_msgpack_ctx(mrb);
+  ensure_class_cache_lfu(mrb);
 }
 
 MRB_API void
@@ -288,20 +566,6 @@ mrb_msgpack_register_unpack_type_cfunc(mrb_state *mrb,
   mrb_value proc = mrb_obj_value(rproc);
 
   mrb_msgpack_register_unpack_type_value(mrb, type, proc);
-}
-
-MRB_API void
-mrb_msgpack_teardown(mrb_state *mrb)
-{
-  mrb_value ctxv = mrb_gv_get(mrb, MRB_SYM(__msgpack__ctx));
-
-  mrb_gv_remove(mrb, MRB_SYM(__msgpack_ext_registry__));
-  mrb_gv_remove(mrb, MRB_SYM(__msgpack__ctx));
-
-  if (likely(mrb_cptr_p(ctxv))) {
-    void *p = mrb_cptr(ctxv);
-    mrb_free(mrb, p);
-  }
 }
 
 MRB_END_DECL
@@ -1413,253 +1677,6 @@ mrb_msgpack_sym_strategy(mrb_state *mrb, mrb_value self)
   return self;
 }
 
-class ClassCacheLfu {
-public:
-  static constexpr uint16_t NIL       = UINT16_MAX;
-  static constexpr uint16_t MAX_FREQ  = 255;
-  static constexpr uint16_t MAX_SIZE  = 128;
-  static constexpr uint16_t INDEX_CAP = 256; // power-of-two
-  static constexpr uint16_t KEY_MAX   = 64;  // max. Länge des Klassennamens
-
-  struct Entry {
-    char     key[KEY_MAX]; // eigene Kopie
-    uint8_t  key_len;      // 0..64
-    uint16_t freq;
-    uint16_t prev;
-    uint16_t next;
-    // ~70–72 Bytes, 128 Einträge ≈ 9 KB
-  };
-
-  struct Bucket {
-    uint16_t head = NIL;
-    uint16_t tail = NIL;
-  };
-
-  struct Slot {
-    uint32_t hash = 0;
-    uint16_t idx  = NIL;
-    bool     used = false;
-  };
-
-
-  Entry    entries[MAX_SIZE]{};
-  uint16_t count = 0;
-
-  Bucket   buckets[MAX_FREQ + 1]{};
-  uint16_t min_freq = 1;
-
-  Slot     index[INDEX_CAP]{};
-
-  // für spätes Löschen im Ruby-Hash
-  uint16_t last_evicted_idx = NIL;
-  bool     had_eviction     = false;
-
-  ClassCacheLfu()  = default;
-  ~ClassCacheLfu() = default;
-
-  void touch(uint16_t idx) {
-    uint16_t old_freq = entries[idx].freq;
-    bucket_remove(idx);
-
-    if (buckets[old_freq].head == NIL && old_freq == min_freq) {
-      if (min_freq < MAX_FREQ) min_freq++;
-    }
-
-    uint16_t new_freq = old_freq < MAX_FREQ ? old_freq + 1 : MAX_FREQ;
-    bucket_insert(idx, new_freq);
-  }
-
-  void insert(const char* key_ptr, uint16_t key_len) {
-    if (key_len > KEY_MAX) {
-      return; // zu lang → nicht cachen
-    }
-
-    uint16_t idx;
-    if (count < MAX_SIZE) {
-      idx = count++;
-    } else {
-      idx = evict_one();
-      if (idx == NIL) {
-        mrb_assert(false && "LFU evict_one() returned NIL in insert");
-        return; // Release: kein Cache-Eintrag, aber kein Crash
-      }
-    }
-
-    Entry &e = entries[idx];
-    std::memcpy(e.key, key_ptr, key_len);
-    e.key_len = (uint8_t)key_len;
-    e.freq    = 1;
-    e.prev    = NIL;
-    e.next    = NIL;
-    min_freq  = 1;
-
-    bucket_insert(idx, 1);
-    index_set(e, idx);
-  }
-
-
-  uint16_t find(const char* key_ptr, uint16_t key_len) const {
-    if (key_len > KEY_MAX) return NIL;
-
-    uint32_t h    = hash(key_ptr, key_len);
-    uint16_t mask = INDEX_CAP - 1;
-
-    for (uint16_t i = 0; i < INDEX_CAP; ++i) {
-      uint16_t slot = (h + i) & mask;
-      const Slot &s = index[slot];
-
-      if (!s.used) return NIL;
-      if (s.hash == h) {
-        const Entry &e = entries[s.idx];
-        if (e.key_len == key_len &&
-            std::memcmp(e.key, key_ptr, key_len) == 0) {
-          return s.idx;
-        }
-      }
-    }
-    return NIL;
-  }
-
-  void evict(mrb_state *mrb, mrb_value class_cache) {
-    if (!had_eviction || last_evicted_idx == NIL) return;
-
-    Entry &e = entries[last_evicted_idx];
-    mrb_value key_str = mrb_str_new_static(mrb, e.key, e.key_len);
-    mrb_hash_delete_key(mrb, class_cache, key_str);
-
-    had_eviction     = false;
-    last_evicted_idx = NIL;
-  }
-
-private:
-  static uint32_t hash(const char* p, uint16_t len) {
-    uint32_t h = 2166136261u;
-    for (uint16_t i = 0; i < len; ++i) {
-      h ^= static_cast<unsigned char>(p[i]);
-      h *= 16777619u;
-    }
-    return h;
-  }
-
-  void index_set(const Entry &e, uint16_t idx) {
-    uint32_t h    = hash(e.key, e.key_len);
-    uint16_t mask = INDEX_CAP - 1;
-
-    int attempts = 0;
-
-    for (;;) {
-      for (uint16_t i = 0; i < INDEX_CAP; ++i) {
-        uint16_t slot = (h + i) & mask;
-        Slot &s = index[slot];
-
-        if (!s.used || (s.hash == h && s.idx == idx)) {
-          s.used = true;
-          s.hash = h;
-          s.idx  = idx;
-          return;
-        }
-      }
-
-      uint16_t victim = evict_one();
-      if (victim == NIL || ++attempts > 4) {
-        mrb_assert(false && "can't find free slot");
-        return;
-      }
-    }
-  }
-
-  void index_erase(const Entry &e) {
-    uint32_t h    = hash(e.key, e.key_len);
-    uint16_t mask = INDEX_CAP - 1;
-
-    for (uint16_t i = 0; i < INDEX_CAP; ++i) {
-      uint16_t slot = (h + i) & mask;
-      Slot &s = index[slot];
-
-      if (!s.used) return;
-      if (s.hash == h && s.idx == (&e - entries)) {
-        s.used = false;
-        return;
-      }
-    }
-  }
-
-  void bucket_remove(uint16_t idx) {
-    Entry  &e = entries[idx];
-    Bucket &b = buckets[e.freq];
-
-    if (e.prev != NIL) entries[e.prev].next = e.next;
-    else b.head = e.next;
-
-    if (e.next != NIL) entries[e.next].prev = e.prev;
-    else b.tail = e.prev;
-
-    e.prev = e.next = NIL;
-  }
-
-  void bucket_insert(uint16_t idx, uint16_t freq) {
-    Bucket &b = buckets[freq];
-    Entry  &e = entries[idx];
-
-    e.freq = freq;
-    e.prev = b.tail;
-    e.next = NIL;
-
-    if (b.tail != NIL) entries[b.tail].next = idx;
-    else b.head = idx;
-
-    b.tail = idx;
-  }
-
-  uint16_t evict_one() {
-    // Suche den nächsten nicht-leeren Bucket ab min_freq
-    uint16_t f = min_freq;
-    while (f <= MAX_FREQ && buckets[f].head == NIL) {
-      ++f;
-    }
-
-    if (f > MAX_FREQ) {
-      // Kein Eintrag zum Evicten → darf eigentlich nicht passieren,
-      // aber wir schützen uns defensiv.
-      return NIL;
-    }
-
-    min_freq = f;
-
-    uint16_t idx = buckets[min_freq].head;
-    if (idx == NIL) {
-      return NIL; // zusätzliche Sicherung
-    }
-
-    Entry &e = entries[idx];
-
-    bucket_remove(idx);
-    index_erase(e);
-
-    last_evicted_idx = idx;
-    had_eviction     = true;
-
-    return idx;
-  }
-
-};
-
-MRB_CPP_DEFINE_TYPE(ClassCacheLfu, class_cache_lfu)
-
-static mrb_value
-class_cache_lfu_initialize(mrb_state *mrb, mrb_value self)
-{
-  mrb_cpp_new<ClassCacheLfu>(mrb, self);
-  return self;
-}
-
-static inline ClassCacheLfu *
-get_lfu(mrb_state *mrb)
-{
-  mrb_value obj = mrb_gv_get(mrb, MRB_SYM(__mrb_actor_class_lfu__));
-  return static_cast<ClassCacheLfu*>(mrb_data_get_ptr(mrb, obj, &class_cache_lfu_type));
-}
-
 MRB_BEGIN_DECL
 MRB_API mrb_value
 mrb_str_constantize(mrb_state* mrb, mrb_value str)
@@ -1675,9 +1692,9 @@ mrb_str_constantize(mrb_state* mrb, mrb_value str)
   string_view full(ptr, len);
 
   mrb_value class_cache =
-      mrb_gv_get(mrb, MRB_SYM(__mrb_actor_class_cache__));
+      mrb_gv_get(mrb, MRB_SYM(__mrb_msgpack_class_cache__));
 
-  ClassCacheLfu *lfu = get_lfu(mrb);
+  ClassCacheLfu *lfu = ensure_class_cache_lfu(mrb);
 
   mrb_value klass = mrb_hash_get(mrb, class_cache, str);
 
@@ -1885,28 +1902,8 @@ mrb_mruby_simplemsgpack_gem_init(mrb_state* mrb)
 
   /* Ensure GV-backed registry + ctx are initialized so Ruby and C APIs share state */
   mrb_msgpack_ensure(mrb);
-
-  mrb_value class_cache = mrb_hash_new(mrb);
-  mrb_gv_set(mrb, MRB_SYM(__mrb_actor_class_cache__), class_cache);
-
-  struct RClass *lfu_class =
-      mrb_define_class_under_id(mrb, msgpack_mod, MRB_SYM(__ClassCacheLfu), mrb->object_class);
-
-  MRB_SET_INSTANCE_TT(lfu_class, MRB_TT_DATA);
-
-  mrb_define_method_id(
-      mrb, lfu_class, MRB_SYM(initialize),
-      class_cache_lfu_initialize,
-      MRB_ARGS_NONE());
-
-  mrb_value lfu_obj = mrb_obj_new(mrb, lfu_class, 0, NULL);
-  mrb_gv_set(mrb, MRB_SYM(__mrb_actor_class_lfu__), lfu_obj);
 }
 
 void
-mrb_mruby_simplemsgpack_gem_final(mrb_state* mrb)
-{
-  /* Clean up GV-backed ctx/registry */
-  mrb_msgpack_teardown(mrb);
-}
+mrb_mruby_simplemsgpack_gem_final(mrb_state* mrb) {}
 MRB_END_DECL
