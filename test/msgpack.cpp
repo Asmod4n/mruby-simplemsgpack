@@ -136,7 +136,7 @@ mrb_define_module_function(mrb, msgpack_test,
                              mrb_msgpack_test_sym_strategy_get, MRB_ARGS_NONE());
 
   mrb_define_module_function(mrb, msgpack_test, "sym_strategy_set",
-                             mrb_msgpack_test_sym_strategy_set, MRB_ARGS_REQ(1));
+                             mrb_msgpack_test_sym_strategy_set, MRB_ARGS_ARG(1, 1));
 
   /* Constants */
   mrb_define_const(mrb, msgpack_test, "FIXNUM_MAX",
