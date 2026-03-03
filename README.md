@@ -1,3 +1,6 @@
+This library is in maintanance mode, no new features will be added, if you got a bugfix please send a PR.
+Development resources will be focused on mruby-cbor (to be released officially in the future) since its a better fit for mruby.
+
 mruby-simplemsgpack
 ===================
 
