@@ -11,6 +11,7 @@ MRuby::Gem::Specification.new('mruby-simplemsgpack') do |spec|
   spec.add_dependency 'mruby-errno'
   spec.add_dependency 'mruby-error'
   spec.add_dependency 'mruby-string-is-utf8'
+  spec.add_dependency 'mruby-str-constantize', github: 'Asmod4n/mruby-str-constantize', branch: 'main'
   spec.add_dependency 'mruby-c-ext-helpers'
   spec.add_dependency 'mruby-time'
   spec.add_conflict   'mruby-msgpack'
