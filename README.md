@@ -1,3 +1,7 @@
+This library is no longer in development, when you need a bugfix please send a PR.
+
+For new projects take a look at https://github.com/Asmod4n/mruby-cbor.
+
 mruby-simplemsgpack
 ===================
 
